@@ -159,7 +159,7 @@ def process_files(files: List[str], is_pdf: bool = False) -> Dict[str, Any]:
     return results
     
 def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True, 
-                  with_context: bool = False, context_size: int = 2) -> Dict[str, Any]:
+                  with_context: bool = None, context_size: int = None) -> Dict[str, Any]:
     """
     Query the GraphRAG system and get results
     
@@ -176,10 +176,22 @@ def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True,
     # Reload environment variables
     reload_env()
     
-    # Use value from config if not provided
+    # Use values from config if not provided
+    process_config = get_process_config()
     if top_k is None:
-        top_k = get_process_config()["top_k_retrieval"]
+        top_k = process_config["top_k_retrieval"]
         logger.info(f"Using top_k_retrieval from config: {top_k}")
+    
+    # Use environment variable defaults for context settings if not specified
+    if with_context is None:
+        with_context = process_config["with_context"]
+        if with_context:
+            logger.info(f"Using with_context from config: {with_context}")
+            
+    if context_size is None:
+        context_size = process_config["context_size"]
+        if with_context:
+            logger.info(f"Using context_size from config: {context_size}")
     
     logger.info(f"Querying GraphRAG with: '{query}'")
     
@@ -287,6 +299,8 @@ def parse_args():
     # Get defaults from config
     process_config = get_process_config()
     default_top_k = process_config["top_k_retrieval"]
+    default_with_context = process_config["with_context"]
+    default_context_size = process_config["context_size"]
     
     parser = argparse.ArgumentParser(description="GraphRAG: Graph-based Retrieval Augmented Generation")
     
@@ -309,10 +323,18 @@ def parse_args():
     query_parser.add_argument("--top-k", type=int, default=default_top_k, 
                              help=f"Number of top results (default: {default_top_k})")
     query_parser.add_argument("--no-triplets", action="store_true", help="Don't include triplets in results")
-    query_parser.add_argument("--with-context", action="store_true", 
-                             help="Include surrounding document context (chunks before/after matches)")
-    query_parser.add_argument("--context-size", type=int, default=2,
-                             help="Number of chunks to include before and after matches (default: 2)")
+    
+    # If default_with_context is True, provide an option to turn it off
+    if default_with_context:
+        query_parser.add_argument("--no-context", action="store_true", 
+                                help="Disable document context retrieval (overrides WITH_CONTEXT setting)")
+    # Otherwise, provide an option to turn it on
+    else:
+        query_parser.add_argument("--with-context", action="store_true", 
+                                help="Include surrounding document context (chunks before/after matches)")
+    
+    query_parser.add_argument("--context-size", type=int, default=default_context_size,
+                            help=f"Number of chunks to include before and after matches (default: {default_context_size})")
     
     # Interactive command
     interactive_parser = subparsers.add_parser("interactive", help="Run interactive query session")
@@ -325,13 +347,20 @@ def run_interactive_session():
     print("Type 'exit' or 'quit' to end the session")
     print("Type 'help' for available commands")
     
+    # Get default settings from environment
+    process_config = get_process_config()
+    
     # Default settings
     interactive_settings = {
-        "top_k": get_process_config()["top_k_retrieval"],
+        "top_k": process_config["top_k_retrieval"],
         "include_triplets": True,
-        "with_context": False,
-        "context_size": 2
+        "with_context": process_config["with_context"],
+        "context_size": process_config["context_size"]
     }
+    
+    print("\nCurrent settings:")
+    for key, value in interactive_settings.items():
+        print(f"  {key}: {value}")
     
     while True:
         try:
@@ -416,7 +445,28 @@ def main():
             print(f"Processed {len(results)} documents successfully.")
             
         elif args.command == "query":
-            results = query_graphrag(args.query, args.top_k, not args.no_triplets, args.with_context, args.context_size)
+            # Handle the context settings based on environment and arguments
+            process_config = get_process_config()
+            default_with_context = process_config["with_context"]
+            
+            # Determine if we should use context
+            with_context = None  # Let query_graphrag use the environment setting as default
+            if default_with_context:
+                # If default is ON, check if user wants to turn it OFF
+                if hasattr(args, "no_context") and args.no_context:
+                    with_context = False
+            else:
+                # If default is OFF, check if user wants to turn it ON
+                if hasattr(args, "with_context") and args.with_context:
+                    with_context = True
+            
+            results = query_graphrag(
+                args.query, 
+                args.top_k, 
+                not args.no_triplets, 
+                with_context, 
+                args.context_size
+            )
             print_query_results(results)
             
         elif args.command == "interactive":
