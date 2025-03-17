@@ -1,1 +1,0 @@
-"""Model definitions for GraphRAG"""

@@ -8,13 +8,17 @@ import logging
 import os
 import uuid
 import hashlib
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class QdrantConnection:
     """Manages connection to Qdrant for vector search in GraphRAG"""
     
-    def __init__(self, url="http://localhost:6333", api_key=None):
+    def __init__(self, url=None, api_key=None):
         """
         Initialize Qdrant client
         
@@ -22,16 +26,17 @@ class QdrantConnection:
             url: Qdrant server URL
             api_key: API key for authentication (if needed)
         """
-        self.url = url
-        self.api_key = api_key
+        # Use environment variables if not provided
+        self.url = url or os.getenv("QDRANT_URL", "http://localhost:6333")
+        self.api_key = api_key or os.getenv("QDRANT_API_KEY")
         
         # Create client
-        if api_key:
-            self.client = QdrantClient(url=url, api_key=api_key)
+        if self.api_key:
+            self.client = QdrantClient(url=self.url, api_key=self.api_key)
         else:
-            self.client = QdrantClient(url=url)
+            self.client = QdrantClient(url=self.url)
         
-        logger.info(f"Initialized Qdrant connection to {url}")
+        logger.info(f"Initialized Qdrant connection to {self.url}")
     
     def test_connection(self):
         """
@@ -49,7 +54,7 @@ class QdrantConnection:
             logger.error(f"Qdrant connection failed: {str(e)}")
             return False
     
-    def create_collection(self, collection_name="tokens", vector_size=768):
+    def create_collection(self, collection_name=None, vector_size=None):
         """
         Create a collection for storing vector embeddings
         
@@ -60,6 +65,10 @@ class QdrantConnection:
         Returns:
             bool: True if successful
         """
+        # Use environment variables if not provided
+        collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "tokens")
+        vector_size = vector_size or int(os.getenv("VECTOR_SIZE", "768"))
+        
         try:
             # Check if collection exists
             collections = self.client.get_collections().collections
@@ -172,7 +181,7 @@ class QdrantConnection:
             logger.error(f"Search failed: {str(e)}")
             return []
 
-    def setup_collections(self, collection_name="tokens", vector_size=768, only_if_not_exists=True):
+    def setup_collections(self, collection_name=None, vector_size=None, only_if_not_exists=True):
         """
         Set up necessary collections for GraphRAG
         
@@ -184,6 +193,10 @@ class QdrantConnection:
         Returns:
             bool: True if successful
         """
+        # Use environment variables if not provided
+        collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "tokens")
+        vector_size = vector_size or int(os.getenv("VECTOR_SIZE", "768"))
+        
         try:
             # Check if collection exists
             if only_if_not_exists:
@@ -209,7 +222,7 @@ class QdrantConnection:
             logger.error(f"Failed to set up collections: {str(e)}")
             return False
 
-    def clear_collection(self, collection_name="tokens"):
+    def clear_collection(self, collection_name=None):
         """
         Clear a collection in Qdrant by deleting all points
         
@@ -219,6 +232,9 @@ class QdrantConnection:
         Returns:
             bool: True if successful
         """
+        # Use environment variables if not provided
+        collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "tokens")
+        
         try:
             # Check if collection exists
             collections = [c.name for c in self.client.get_collections().collections]
@@ -243,7 +259,7 @@ class QdrantConnection:
 # Default connection instance
 default_connection = None
 
-def get_connection(url="http://localhost:6333", api_key=None):
+def get_connection(url=None, api_key=None):
     """
     Get or create the default Qdrant connection
     
@@ -256,11 +272,7 @@ def get_connection(url="http://localhost:6333", api_key=None):
     """
     global default_connection
     if default_connection is None:
-        # Check for environment variables
-        env_url = os.environ.get("QDRANT_URL", url)
-        env_api_key = os.environ.get("QDRANT_API_KEY", api_key)
-        
-        default_connection = QdrantConnection(env_url, env_api_key)
+        default_connection = QdrantConnection(url, api_key)
     return default_connection
 
 

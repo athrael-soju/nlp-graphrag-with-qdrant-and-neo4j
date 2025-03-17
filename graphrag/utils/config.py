@@ -1,89 +1,117 @@
 """
-Configuration utilities for GraphRAG.
+Configuration utilities for GraphRAG
 """
 
 import os
-import json
-from typing import Dict, Any, Optional
+import logging
+from typing import Any, Dict, Optional
+from dotenv import load_dotenv, find_dotenv
 
-DEFAULT_CONFIG = {
-    "neo4j": {
-        "uri": "bolt://localhost:7687",
-        "user": "neo4j",
-        "password": "testpassword"
-    },
-    "qdrant": {
-        "host": "localhost",
-        "port": 6333
-    },
-    "embedding": {
-        "model_name": "intfloat/e5-base",
-        "device": "cpu"
-    },
-    "triplet_extraction": {
-        "model_name": "google/flan-t5-base",
-        "device": "cpu"
-    },
-    "data_dir": "data"
-}
+# Initialize logger
+logger = logging.getLogger(__name__)
 
-CONFIG_FILE_PATH = os.path.expanduser("~/.graphrag/config.json")
-
-def load_config() -> Dict[str, Any]:
+def reload_env():
     """
-    Load configuration from file or use defaults.
+    Reload environment variables from .env file
     
     Returns:
-        Configuration dictionary
+        bool: True if .env file was found and loaded
     """
-    if os.path.exists(CONFIG_FILE_PATH):
-        try:
-            with open(CONFIG_FILE_PATH, "r") as f:
-                user_config = json.load(f)
-                # Merge with defaults
-                config = DEFAULT_CONFIG.copy()
-                for key, value in user_config.items():
-                    if isinstance(value, dict) and key in config and isinstance(config[key], dict):
-                        config[key].update(value)
-                    else:
-                        config[key] = value
-                return config
-        except Exception as e:
-            print(f"Error loading config file: {e}")
-            return DEFAULT_CONFIG
-    else:
-        return DEFAULT_CONFIG
+    # Find the .env file
+    dotenv_path = find_dotenv()
+    if not dotenv_path:
+        logger.warning("No .env file found. Using default values.")
+        return False
+        
+    # Load environment variables with override=True to refresh values
+    load_dotenv(dotenv_path, override=True)
+    logger.info(f"Loaded environment variables from {dotenv_path}")
+    return True
 
-def save_config(config: Dict[str, Any]) -> None:
+# Load environment variables on module import
+reload_env()
+
+def get_config(key: str, default: Optional[Any] = None) -> Any:
     """
-    Save configuration to file.
+    Get a configuration value from environment variables
     
     Args:
-        config: Configuration dictionary
-    """
-    os.makedirs(os.path.dirname(CONFIG_FILE_PATH), exist_ok=True)
-    with open(CONFIG_FILE_PATH, "w") as f:
-        json.dump(config, f, indent=2)
-
-def get_config_value(key: str, default: Optional[Any] = None) -> Any:
-    """
-    Get a specific configuration value.
-    
-    Args:
-        key: Configuration key (can use dot notation for nested keys)
-        default: Default value if key not found
+        key: Configuration key
+        default: Default value if not found
         
     Returns:
-        Configuration value or default
+        Configuration value
     """
-    config = load_config()
-    keys = key.split(".")
+    # Always reload env to get fresh values
+    reload_env()
     
-    current = config
-    for k in keys:
-        if isinstance(current, dict) and k in current:
-            current = current[k]
-        else:
-            return default
-            
-    return current 
+    # Get from environment variables
+    env_value = os.getenv(key.upper(), default)
+    
+    # Try to convert numeric values
+    if isinstance(env_value, str):
+        # Try to convert to int if possible
+        try:
+            if env_value.isdigit():
+                return int(env_value)
+            # Try to convert to float if possible
+            elif '.' in env_value and all(part.isdigit() for part in env_value.split('.', 1)):
+                return float(env_value)
+        except ValueError:
+            pass
+    
+    return env_value
+
+def get_neo4j_config() -> Dict[str, Any]:
+    """
+    Get Neo4j configuration
+    
+    Returns:
+        Dict with Neo4j configuration
+    """
+    return {
+        "uri": get_config("NEO4J_URI", "bolt://localhost:7687"),
+        "auth": (get_config("NEO4J_USER", "neo4j"), get_config("NEO4J_PASSWORD", "testpassword"))
+    }
+
+def get_qdrant_config() -> Dict[str, Any]:
+    """
+    Get Qdrant configuration
+    
+    Returns:
+        Dict with Qdrant configuration
+    """
+    config = {
+        "url": get_config("QDRANT_URL", "http://localhost:6333"),
+    }
+    
+    # Add API key only if it exists
+    api_key = get_config("QDRANT_API_KEY")
+    if api_key:
+        config["api_key"] = api_key
+        
+    return config
+
+def get_model_config() -> Dict[str, Any]:
+    """
+    Get model configuration
+    
+    Returns:
+        Dict with model configuration
+    """
+    return {
+        "triplet_model": get_config("TRIPLET_MODEL", "bew/t5_sentence_to_triplet_xl"),
+        "embedding_model": get_config("EMBEDDING_MODEL", "intfloat/e5-base-v2")
+    }
+
+def get_process_config() -> Dict[str, Any]:
+    """
+    Get processing configuration
+    
+    Returns:
+        Dict with processing configuration
+    """
+    return {
+        "max_tokens_per_chunk": get_config("MAX_TOKENS_PER_CHUNK", 200),
+        "top_k_retrieval": get_config("TOP_K_RETRIEVAL", 10)
+    }

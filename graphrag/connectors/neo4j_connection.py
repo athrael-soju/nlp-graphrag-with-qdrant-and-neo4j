@@ -4,13 +4,18 @@ Neo4j database connection utilities for GraphRAG
 
 from neo4j import GraphDatabase
 import logging
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class Neo4jConnection:
     """Manages connection to Neo4j database for GraphRAG"""
     
-    def __init__(self, uri="bolt://localhost:7687", auth=("neo4j", "testpassword")):
+    def __init__(self, uri=None, auth=None):
         """
         Initialize Neo4j driver
         
@@ -18,10 +23,18 @@ class Neo4jConnection:
             uri: Neo4j connection URI
             auth: Authentication tuple (username, password)
         """
-        self.uri = uri
-        self.auth = auth
-        self.driver = GraphDatabase.driver(uri, auth=auth)
-        logger.info(f"Initialized Neo4j connection to {uri}")
+        # Use environment variables if not provided
+        self.uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        
+        if auth is None:
+            username = os.getenv("NEO4J_USER", "neo4j")
+            password = os.getenv("NEO4J_PASSWORD", "testpassword")
+            self.auth = (username, password)
+        else:
+            self.auth = auth
+            
+        self.driver = GraphDatabase.driver(self.uri, auth=self.auth)
+        logger.info(f"Initialized Neo4j connection to {self.uri}")
         
     def close(self):
         """Close the Neo4j driver"""
@@ -150,7 +163,7 @@ class Neo4jConnection:
 # Default connection instance
 default_connection = None
 
-def get_connection(uri="bolt://localhost:7687", auth=("neo4j", "testpassword")):
+def get_connection(uri=None, auth=None):
     """
     Get or create the default Neo4j connection
     

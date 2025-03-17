@@ -1,136 +1,288 @@
 """
-Document ingestion module for GraphRAG.
+Document ingestion and processing utilities for GraphRAG
 """
 
 import os
 import logging
-from typing import List, Tuple, Dict, Any, Optional
-
 import numpy as np
+from typing import List, Tuple, Optional, Dict, Any
+import nltk
 
-# Setup logging
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
+
+from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
+from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-def split_text_into_chunks(text: str, max_tokens: int = 200) -> List[str]:
-    """
-    Split text into chunks of approximately max_tokens.
-    
-    Args:
-        text: Text to split
-        max_tokens: Maximum tokens per chunk (approximate)
-        
-    Returns:
-        List of text chunks
-    """
-    # Simple splitting by sentences and then combining until max_tokens
-    sentences = text.replace('\n', ' ').split('. ')
-    chunks = []
-    current_chunk = []
-    current_size = 0
-    
-    for sentence in sentences:
-        # Approximate token count by word count
-        sentence_size = len(sentence.split())
-        
-        if current_size + sentence_size > max_tokens and current_chunk:
-            chunks.append('. '.join(current_chunk) + '.')
-            current_chunk = [sentence]
-            current_size = sentence_size
-        else:
-            current_chunk.append(sentence)
-            current_size += sentence_size
-    
-    if current_chunk:
-        chunks.append('. '.join(current_chunk) + '.')
-        
-    return chunks
+# Download NLTK resources
+try:
+    nltk.download('punkt', quiet=True)
+except Exception as e:
+    logger.warning(f"Failed to download NLTK resources: {str(e)}")
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """
-    Extract text from PDF file.
+class DocumentIngestor:
+    """Handles document loading, processing, and storage in Neo4j and Qdrant"""
     
-    Args:
-        pdf_path: Path to PDF file
+    def __init__(self, neo4j_conn=None, qdrant_conn=None, embedding_model=DEFAULT_EMBEDDING_MODEL):
+        """Initialize DocumentIngestor
         
-    Returns:
-        Extracted text
-    """
-    try:
-        import fitz  # PyMuPDF
+        Args:
+            neo4j_conn: Neo4j connection instance
+            qdrant_conn: Qdrant connection instance
+            embedding_model: Name or path of the embedding model
+        """
+        self.neo4j = neo4j_conn or get_neo4j_connection()
+        self.qdrant = qdrant_conn or get_qdrant_connection()
+        self.embedding_model = embedding_model
+        logger.info(f"Using embedding model: {embedding_model}")
         
+    def load_pdf(self, path: str) -> str:
+        """Load text from a PDF file
+        
+        Args:
+            path: Path to the PDF file
+            
+        Returns:
+            str: Extracted text from the PDF
+        """
+        if fitz is None:
+            raise ImportError("PyMuPDF (fitz) is required to load PDF files. Install with 'pip install pymupdf'")
+            
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"PDF file not found: {path}")
+            
+        logger.info(f"Loading PDF from {path}")
         text = ""
-        with fitz.open(pdf_path) as doc:
-            for page in doc:
-                text += page.get_text()
-        return text
-    except ImportError:
-        logger.error("PyMuPDF (fitz) is required for PDF support. Install with: pip install pymupdf")
-        raise
-    except Exception as e:
-        logger.error(f"Error extracting text from PDF: {str(e)}")
-        raise
+        try:
+            with fitz.open(path) as doc:
+                for page in doc:
+                    text += page.get_text()
+            logger.info(f"Successfully extracted text from PDF: {path}")
+            return text
+        except Exception as e:
+            logger.error(f"Failed to extract text from PDF {path}: {str(e)}")
+            raise
+            
+    def chunk_text(self, text: str, max_tokens: int = 200) -> List[str]:
+        """Split text into chunks
+        
+        Args:
+            text: Input text
+            max_tokens: Maximum tokens per chunk
+            
+        Returns:
+            List[str]: List of text chunks
+        """
+        if not text:
+            logger.warning("Received empty text for chunking")
+            return []
+            
+        logger.info(f"Chunking text ({len(text)} chars) with max {max_tokens} tokens per chunk")
+        sentences = nltk.sent_tokenize(text)
+        chunks = []
+        current_chunk = []
+        current_length = 0
+        
+        for sent in sentences:
+            tokens = nltk.word_tokenize(sent)
+            if current_length + len(tokens) > max_tokens and current_chunk:
+                # Start new chunk if current one would exceed max_tokens
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+                
+            current_chunk.append(sent)
+            current_length += len(tokens)
+            
+        # Add the final chunk if it's not empty
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+            
+        logger.info(f"Created {len(chunks)} chunks from input text")
+        return chunks
+        
+    def embed_chunks(self, chunks: List[str]) -> np.ndarray:
+        """Generate embeddings for text chunks
+        
+        Args:
+            chunks: List of text chunks
+            
+        Returns:
+            np.ndarray: Matrix of embeddings (chunks × embedding_dim)
+        """
+        if not chunks:
+            logger.warning("No chunks provided for embedding")
+            return np.array([])
+            
+        logger.info(f"Generating embeddings for {len(chunks)} chunks")
+        try:
+            # Use shared embedding utility with E5 passage prefix
+            embeddings = embed_text(chunks, model_name=self.embedding_model, normalize=True)
+            logger.info(f"Successfully generated embeddings of shape {embeddings.shape}")
+            return embeddings
+        except Exception as e:
+            logger.error(f"Failed to generate embeddings: {str(e)}")
+            raise
+            
+    def store_chunks_in_neo4j(self, doc_id: str, chunks: List[str], 
+                          embeddings: np.ndarray) -> None:
+        """Store document chunks and metadata in Neo4j
+        
+        Args:
+            doc_id: Document identifier
+            chunks: List of text chunks
+            embeddings: Chunk embeddings
+        """
+        # Create document node if it doesn't exist
+        doc_query = """
+        MERGE (d:Document {id: $doc_id})
+        RETURN d
+        """
+        self.neo4j.run_query(doc_query, {"doc_id": doc_id})
+        
+        # Create chunk nodes and connect to document
+        for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+            chunk_id = f"{doc_id}_chunk{i}"
+            chunk_query = """
+            MATCH (d:Document {id: $doc_id})
+            MERGE (c:Chunk {id: $chunk_id})
+            SET c.text = $text, 
+                c.index = $index
+            MERGE (d)-[:CONTAINS]->(c)
+            RETURN c
+            """
+            params = {
+                "doc_id": doc_id,
+                "chunk_id": chunk_id,
+                "text": chunk_text,
+                "index": i
+            }
+            self.neo4j.run_query(chunk_query, params)
+            
+        logger.info(f"Stored {len(chunks)} chunks for document {doc_id} in Neo4j")
+        
+    def store_embeddings_in_qdrant(self, doc_id: str, chunks: List[str], 
+                                embeddings: np.ndarray) -> None:
+        """Store document chunk embeddings in Qdrant
+        
+        Args:
+            doc_id: Document identifier
+            chunks: List of text chunks
+            embeddings: Chunk embeddings
+        """
+        # Prepare IDs and metadata for Qdrant
+        ids = []
+        metadata = []
+        
+        for i, chunk_text in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk{i}"
+            ids.append(chunk_id)
+            metadata.append({
+                "doc_id": doc_id, 
+                "chunk_index": i,
+                "text": chunk_text[:1000]  # Store truncated text in metadata for quick access
+            })
+        
+        # Store in Qdrant
+        result = self.qdrant.upsert_vectors(
+            collection_name="tokens", 
+            vectors=embeddings.tolist(), 
+            ids=ids, 
+            metadata=metadata
+        )
+        
+        if result:
+            logger.info(f"Stored {len(chunks)} embeddings for document {doc_id} in Qdrant")
+        else:
+            logger.error(f"Failed to store embeddings for document {doc_id} in Qdrant")
+            
+    def process_document(self, doc_id: str, text: str = None, pdf_path: str = None, 
+                     max_tokens: int = 200) -> Tuple[List[str], np.ndarray]:
+        """Process a document: load, chunk, embed, and store
+        
+        Args:
+            doc_id: Document identifier
+            text: Document text (if provided directly)
+            pdf_path: Path to PDF file (if loading from PDF)
+            max_tokens: Maximum tokens per chunk
+            
+        Returns:
+            Tuple[List[str], np.ndarray]: Chunks and embeddings
+        """
+        # Load document
+        if text is None and pdf_path is not None:
+            text = self.load_pdf(pdf_path)
+        elif text is None:
+            raise ValueError("Either text or pdf_path must be provided")
+            
+        # Chunk text
+        chunks = self.chunk_text(text, max_tokens)
+        logger.info(f"Split document into {len(chunks)} chunks")
+        
+        # Generate embeddings
+        embeddings = self.embed_chunks(chunks)
+        logger.info(f"Generated embeddings of shape {embeddings.shape}")
+        
+        # Store in Neo4j
+        self.store_chunks_in_neo4j(doc_id, chunks, embeddings)
+        
+        # Store in Qdrant
+        self.store_embeddings_in_qdrant(doc_id, chunks, embeddings)
+        
+        return chunks, embeddings
 
-def embed_text(text: str) -> np.ndarray:
-    """
-    Generate embeddings for text.
-    
-    Args:
-        text: Text to embed
-        
-    Returns:
-        Text embedding
-    """
-    try:
-        from sentence_transformers import SentenceTransformer
-        
-        # Load model (first time will download the model)
-        model = SentenceTransformer('intfloat/e5-base')
-        
-        # Generate embedding
-        embedding = model.encode(text)
-        return embedding
-    except ImportError:
-        logger.error("SentenceTransformer is required for embedding. Install with: pip install sentence-transformers")
-        raise
-    except Exception as e:
-        logger.error(f"Error generating embeddings: {str(e)}")
-        raise
+# Convenience functions
+
+def load_pdf(path: str) -> str:
+    """Load text from a PDF file (standalone function)"""
+    ingestor = DocumentIngestor()
+    return ingestor.load_pdf(path)
+
+def chunk_text(text: str, max_tokens: int = 200) -> List[str]:
+    """Chunk text into segments (standalone function)"""
+    ingestor = DocumentIngestor()
+    return ingestor.chunk_text(text, max_tokens)
+
+def embed_chunks(chunks: List[str]) -> np.ndarray:
+    """Embed text chunks (standalone function)"""
+    ingestor = DocumentIngestor()
+    return ingestor.embed_chunks(chunks)
+
+def store_chunks_in_neo4j(doc_id: str, chunks: List[str], embeddings: np.ndarray) -> None:
+    """Store document chunks in Neo4j (standalone function)"""
+    ingestor = DocumentIngestor()
+    ingestor.store_chunks_in_neo4j(doc_id, chunks, embeddings)
+
+def store_embeddings_in_qdrant(doc_id: str, chunks: List[str], embeddings: np.ndarray) -> None:
+    """Store document chunk embeddings in Qdrant (standalone function)"""
+    ingestor = DocumentIngestor()
+    ingestor.store_embeddings_in_qdrant(doc_id, chunks, embeddings)
 
 def process_document(doc_id: str, text: str = None, pdf_path: str = None, 
-                      max_tokens: int = 200) -> Tuple[List[str], List[np.ndarray]]:
+                 max_tokens: int = 200) -> Tuple[List[str], np.ndarray]:
+    """Process a document (standalone function)"""
+    ingestor = DocumentIngestor()
+    return ingestor.process_document(doc_id, text, pdf_path, max_tokens)
+    
+if __name__ == "__main__":
+    # Setup logging
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Demo with example text
+    example_text = """
+    Hugging Face, Inc. is an American company that develops tools for building applications using machine learning.
+    It was founded in 2016 and its headquarters is in New York City. The company is known for its libraries in natural
+    language processing (NLP) and its platform that allows users to share machine learning models and datasets.
     """
-    Process a document by ingesting, chunking, and embedding.
     
-    Args:
-        doc_id: Document identifier
-        text: Document text (if provided directly)
-        pdf_path: Path to PDF file (if loading from PDF)
-        max_tokens: Maximum tokens per chunk
-        
-    Returns:
-        Tuple of (chunks, embeddings)
-    """
-    logger.info(f"Processing document: {doc_id}")
-    
-    # Get text from either direct input or PDF
-    if text is None and pdf_path is None:
-        raise ValueError("Either text or pdf_path must be provided")
-    
-    if text is None:
-        logger.info(f"Extracting text from PDF: {pdf_path}")
-        text = extract_text_from_pdf(pdf_path)
-    
-    # Split text into chunks
-    logger.info("Splitting text into chunks")
-    chunks = split_text_into_chunks(text, max_tokens)
-    logger.info(f"Created {len(chunks)} chunks")
-    
-    # Generate embeddings for each chunk
-    logger.info("Generating embeddings")
-    embeddings = []
-    for chunk in chunks:
-        embedding = embed_text(chunk)
-        embeddings.append(embedding)
-    
-    logger.info(f"Document processing complete: {doc_id}")
-    return chunks, embeddings 
+    print("Processing example document...")
+    chunks, embeddings = process_document("example_doc", text=example_text)
+    print(f"Created {len(chunks)} chunks with embeddings of shape {embeddings.shape}")
+    print("First chunk:", chunks[0]) 

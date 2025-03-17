@@ -14,14 +14,18 @@ from graphrag.core.ingest import process_document
 from graphrag.core.nlp_graph import process_chunk
 from graphrag.core.triplets import process_chunk as process_chunk_triplets
 from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets
-from graphrag.utils.common import setup_logging
+from graphrag.utils.config import get_process_config, reload_env
 
 # Setup logging
-setup_logging()
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def setup_database():
     """Initialize Neo4j database with necessary indexes and Qdrant collections"""
+    # Reload environment variables
+    reload_env()
+    
     logger.info("Setting up Neo4j database...")
     neo4j = get_neo4j_connection()
     neo4j.setup_indexes()
@@ -59,7 +63,7 @@ def reset_database():
     logger.info("Database reset complete.")
     
 def process_document_full(doc_id: str, text: str = None, pdf_path: str = None, 
-                       max_tokens: int = 200) -> Dict[str, Any]:
+                       max_tokens: int = None) -> Dict[str, Any]:
     """Process a document with all GraphRAG components
     
     Args:
@@ -71,6 +75,14 @@ def process_document_full(doc_id: str, text: str = None, pdf_path: str = None,
     Returns:
         Dict[str, Any]: Processing results
     """
+    # Reload environment variables
+    reload_env()
+    
+    # Use value from config if not provided
+    if max_tokens is None:
+        max_tokens = get_process_config()["max_tokens_per_chunk"]
+        logger.info(f"Using max_tokens_per_chunk from config: {max_tokens}")
+    
     logger.info(f"Processing document {doc_id}...")
     
     # Step 1: Ingest document, chunk, embed, and store in Neo4j
@@ -146,36 +158,49 @@ def process_files(files: List[str], is_pdf: bool = False) -> Dict[str, Any]:
         
     return results
     
-def query_graphrag(query: str, top_k: int = 5, include_triplets: bool = True) -> Dict[str, Any]:
-    """Query the GraphRAG system
+def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True) -> Dict[str, Any]:
+    """
+    Query the GraphRAG system and get results
     
     Args:
-        query: Query string
-        top_k: Number of top results to retrieve
-        include_triplets: Whether to include triplets in results
+        query: User query string
+        top_k: Number of top results to return
+        include_triplets: Whether to use triplet-enhanced retrieval
         
     Returns:
         Dict[str, Any]: Query results
     """
-    logger.info(f"Querying GraphRAG: '{query}'")
+    # Reload environment variables
+    reload_env()
+    
+    # Use value from config if not provided
+    if top_k is None:
+        top_k = get_process_config()["top_k_retrieval"]
+        logger.info(f"Using top_k_retrieval from config: {top_k}")
+    
+    logger.info(f"Querying GraphRAG with: '{query}'")
     
     try:
         if include_triplets:
-            results = hybrid_retrieve_with_triplets(query, top_k)
+            results = hybrid_retrieve_with_triplets(query, top_k=top_k)
         else:
-            chunks = hybrid_retrieve(query, top_k)
-            results = {"chunks": chunks, "triplets": []}
+            results = hybrid_retrieve(query, top_k=top_k)
             
-        return results
+        logger.info(f"Retrieved {len(results)} results")
+        
+        return {
+            'query': query,
+            'results': results,
+            'count': len(results)
+        }
     except Exception as e:
-        error_msg = str(e)
-        if "ProcedureNotFound" in error_msg and "vector" in error_msg:
-            logger.warning("Neo4j vector search is not supported. Using only Qdrant for vector search.")
-            # Try again with a different approach that doesn't use Neo4j vector search
-            from graphrag.core.retrieval import VectorRetriever
-            retriever = VectorRetriever()
-            chunks = retriever.retrieve_chunks(query, top_k)
-            return {"chunks": chunks, "triplets": []}
+        logger.error(f"Error querying GraphRAG: {str(e)}")
+        return {
+            'query': query,
+            'error': str(e),
+            'results': [],
+            'count': 0
+        }
 
 def print_query_results(results: Dict[str, Any]):
     """Print query results in a readable format
@@ -187,8 +212,19 @@ def print_query_results(results: Dict[str, Any]):
     print("QUERY RESULTS:")
     print("="*80)
     
+    # Handle both direct results and results with triplets
+    result_data = results.get("results", [])
+    
+    # If result_data is a dictionary with 'chunks' key, it's from hybrid_retrieve_with_triplets
+    if isinstance(result_data, dict) and "chunks" in result_data:
+        chunks = result_data.get("chunks", [])
+        triplets = result_data.get("triplets", [])
+    else:
+        # Otherwise it's a direct list of chunks from hybrid_retrieve
+        chunks = result_data
+        triplets = []
+    
     # Print chunks
-    chunks = results.get("chunks", [])
     print(f"\nRetrieved {len(chunks)} relevant chunks:")
     for i, (chunk_id, text, score) in enumerate(chunks, 1):
         print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
@@ -196,7 +232,6 @@ def print_query_results(results: Dict[str, Any]):
         print(text)
         
     # Print triplets if available
-    triplets = results.get("triplets", [])
     if triplets:
         print("\n" + "="*80)
         print(f"Found {len(triplets)} relevant knowledge graph triplets:")
@@ -209,6 +244,13 @@ def print_query_results(results: Dict[str, Any]):
 
 def parse_args():
     """Parse command line arguments"""
+    # Reload environment to get fresh config values
+    reload_env()
+    
+    # Get defaults from config
+    process_config = get_process_config()
+    default_top_k = process_config["top_k_retrieval"]
+    
     parser = argparse.ArgumentParser(description="GraphRAG: Graph-based Retrieval Augmented Generation")
     
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -227,7 +269,8 @@ def parse_args():
     # Query command
     query_parser = subparsers.add_parser("query", help="Query the GraphRAG system")
     query_parser.add_argument("query", help="Query string")
-    query_parser.add_argument("--top-k", type=int, default=3, help="Number of top results")
+    query_parser.add_argument("--top-k", type=int, default=default_top_k, 
+                             help=f"Number of top results (default: {default_top_k})")
     query_parser.add_argument("--no-triplets", action="store_true", help="Don't include triplets in results")
     
     # Interactive command

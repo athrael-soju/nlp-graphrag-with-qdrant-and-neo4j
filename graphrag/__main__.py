@@ -1,8 +1,9 @@
 """
-Entry point for the GraphRAG package when run as a module.
+Main entry point for GraphRAG package
 """
 
+import sys
 from graphrag.cli.main import main
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 
