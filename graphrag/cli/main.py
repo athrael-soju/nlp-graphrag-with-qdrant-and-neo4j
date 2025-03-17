@@ -13,7 +13,7 @@ from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_c
 from graphrag.core.ingest import process_document
 from graphrag.core.nlp_graph import process_chunk
 from graphrag.core.triplets import process_chunk as process_chunk_triplets
-from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets
+from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets, retrieve_with_context
 from graphrag.utils.config import get_process_config, reload_env
 
 # Setup logging
@@ -158,7 +158,8 @@ def process_files(files: List[str], is_pdf: bool = False) -> Dict[str, Any]:
         
     return results
     
-def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True) -> Dict[str, Any]:
+def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True, 
+                  with_context: bool = False, context_size: int = 2) -> Dict[str, Any]:
     """
     Query the GraphRAG system and get results
     
@@ -166,6 +167,8 @@ def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True)
         query: User query string
         top_k: Number of top results to return
         include_triplets: Whether to use triplet-enhanced retrieval
+        with_context: Whether to retrieve document context (chunks before/after matches)
+        context_size: Number of chunks to include before and after each match
         
     Returns:
         Dict[str, Any]: Query results
@@ -181,17 +184,23 @@ def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True)
     logger.info(f"Querying GraphRAG with: '{query}'")
     
     try:
-        if include_triplets:
+        # Context-aware retrieval
+        if with_context:
+            results = retrieve_with_context(query, top_k=top_k, context_size=context_size)
+            logger.info(f"Retrieved {len(results)} results with context (context_size={context_size})")
+        # Standard retrieval methods
+        elif include_triplets:
             results = hybrid_retrieve_with_triplets(query, top_k=top_k)
+            logger.info(f"Retrieved {len(results)} results with triplets")
         else:
             results = hybrid_retrieve(query, top_k=top_k)
+            logger.info(f"Retrieved {len(results)} results")
             
-        logger.info(f"Retrieved {len(results)} results")
-        
         return {
             'query': query,
             'results': results,
-            'count': len(results)
+            'count': len(results),
+            'with_context': with_context
         }
     except Exception as e:
         logger.error(f"Error querying GraphRAG: {str(e)}")
@@ -212,34 +221,62 @@ def print_query_results(results: Dict[str, Any]):
     print("QUERY RESULTS:")
     print("="*80)
     
+    # Check if using context-aware retrieval
+    with_context = results.get("with_context", False)
+    
     # Handle both direct results and results with triplets
     result_data = results.get("results", [])
     
+    # Check if we're using context-aware retrieval
+    if with_context:
+        print(f"\nRetrieved chunks with context:")
+        for i, chunk in enumerate(result_data, 1):
+            # Determine if this is a direct match or context
+            is_match = chunk.get("is_match", False)
+            chunk_id = chunk.get("id", "unknown")
+            text = chunk.get("text", "")
+            score = chunk.get("score", 0.0)
+            
+            # Format differently based on whether it's a match or context
+            if is_match:
+                print(f"\n{i}. 🔍 MATCH: Chunk {chunk_id} (score: {score:.3f}):")
+                print("-" * 40)
+            else:
+                print(f"\n{i}. 📄 CONTEXT: Chunk {chunk_id}:")
+                print("-" * 40)
+            print(text)
+    
     # If result_data is a dictionary with 'chunks' key, it's from hybrid_retrieve_with_triplets
-    if isinstance(result_data, dict) and "chunks" in result_data:
+    elif isinstance(result_data, dict) and "chunks" in result_data:
         chunks = result_data.get("chunks", [])
         triplets = result_data.get("triplets", [])
+        
+        # Print chunks
+        print(f"\nRetrieved {len(chunks)} relevant chunks:")
+        for i, (chunk_id, text, score) in enumerate(chunks, 1):
+            print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
+            print("-" * 40)
+            print(text)
+            
+        # Print triplets if available
+        if triplets:
+            print("\n" + "="*80)
+            print(f"Found {len(triplets)} relevant knowledge graph triplets:")
+            print("="*80)
+            
+            for i, (subj, rel, obj, chunk_id, _) in enumerate(triplets, 1):
+                print(f"{i}. {subj} --[{rel}]--> {obj}  (source: {chunk_id})")
     else:
         # Otherwise it's a direct list of chunks from hybrid_retrieve
         chunks = result_data
-        triplets = []
+        
+        # Print chunks
+        print(f"\nRetrieved {len(chunks)} relevant chunks:")
+        for i, (chunk_id, text, score) in enumerate(chunks, 1):
+            print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
+            print("-" * 40)
+            print(text)
     
-    # Print chunks
-    print(f"\nRetrieved {len(chunks)} relevant chunks:")
-    for i, (chunk_id, text, score) in enumerate(chunks, 1):
-        print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
-        print("-" * 40)
-        print(text)
-        
-    # Print triplets if available
-    if triplets:
-        print("\n" + "="*80)
-        print(f"Found {len(triplets)} relevant knowledge graph triplets:")
-        print("="*80)
-        
-        for i, (subj, rel, obj, chunk_id, _) in enumerate(triplets, 1):
-            print(f"{i}. {subj} --[{rel}]--> {obj}  (source: {chunk_id})")
-            
     print("\n" + "="*80)
 
 def parse_args():
@@ -272,6 +309,10 @@ def parse_args():
     query_parser.add_argument("--top-k", type=int, default=default_top_k, 
                              help=f"Number of top results (default: {default_top_k})")
     query_parser.add_argument("--no-triplets", action="store_true", help="Don't include triplets in results")
+    query_parser.add_argument("--with-context", action="store_true", 
+                             help="Include surrounding document context (chunks before/after matches)")
+    query_parser.add_argument("--context-size", type=int, default=2,
+                             help="Number of chunks to include before and after matches (default: 2)")
     
     # Interactive command
     interactive_parser = subparsers.add_parser("interactive", help="Run interactive query session")
@@ -284,6 +325,14 @@ def run_interactive_session():
     print("Type 'exit' or 'quit' to end the session")
     print("Type 'help' for available commands")
     
+    # Default settings
+    interactive_settings = {
+        "top_k": get_process_config()["top_k_retrieval"],
+        "include_triplets": True,
+        "with_context": False,
+        "context_size": 2
+    }
+    
     while True:
         try:
             user_input = input("\nGraphRAG> ").strip()
@@ -293,16 +342,52 @@ def run_interactive_session():
                 
             if user_input.lower() == "help":
                 print("\nAvailable commands:")
-                print("  help       - Show this help message")
-                print("  exit, quit - Exit the session")
-                print("  Any other input will be treated as a query to the GraphRAG system")
+                print("  query <your question> - Query the GraphRAG system")
+                print("  set top_k <number> - Set number of top results")
+                print("  set triplets <on/off> - Include knowledge graph triplets")
+                print("  set context <on/off> - Include document context (chunks before/after matches)")
+                print("  set context_size <number> - Set number of context chunks")
+                print("  show settings - Display current settings")
+                print("  help - Show this help message")
+                print("  exit/quit - Exit the session")
                 continue
                 
-            if not user_input:
+            if user_input.lower().startswith("set "):
+                parts = user_input.split(" ", 2)
+                if len(parts) >= 3:
+                    setting = parts[1].lower()
+                    value = parts[2].lower()
+                    
+                    if setting == "top_k" and value.isdigit():
+                        interactive_settings["top_k"] = int(value)
+                        print(f"Set top_k to {value}")
+                    elif setting == "triplets" and value in ("on", "off"):
+                        interactive_settings["include_triplets"] = (value == "on")
+                        print(f"Set triplets to {value}")
+                    elif setting == "context" and value in ("on", "off"):
+                        interactive_settings["with_context"] = (value == "on")
+                        print(f"Set context to {value}")
+                    elif setting == "context_size" and value.isdigit():
+                        interactive_settings["context_size"] = int(value)
+                        print(f"Set context_size to {value}")
+                    else:
+                        print(f"Unknown setting or invalid value: {setting} {value}")
                 continue
                 
-            # Process query
-            results = query_graphrag(user_input)
+            if user_input.lower() == "show settings":
+                print("\nCurrent settings:")
+                for key, value in interactive_settings.items():
+                    print(f"  {key}: {value}")
+                continue
+                
+            # Treat everything else as a query
+            results = query_graphrag(
+                user_input, 
+                interactive_settings["top_k"],
+                interactive_settings["include_triplets"],
+                interactive_settings["with_context"],
+                interactive_settings["context_size"]
+            )
             print_query_results(results)
             
         except KeyboardInterrupt:
@@ -331,7 +416,7 @@ def main():
             print(f"Processed {len(results)} documents successfully.")
             
         elif args.command == "query":
-            results = query_graphrag(args.query, args.top_k, not args.no_triplets)
+            results = query_graphrag(args.query, args.top_k, not args.no_triplets, args.with_context, args.context_size)
             print_query_results(results)
             
         elif args.command == "interactive":

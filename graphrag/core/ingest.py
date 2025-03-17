@@ -147,6 +147,7 @@ class DocumentIngestor:
         self.neo4j.run_query(doc_query, {"doc_id": doc_id})
         
         # Create chunk nodes and connect to document
+        prev_chunk_id = None
         for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
             chunk_id = f"{doc_id}_chunk{i}"
             chunk_query = """
@@ -165,7 +166,22 @@ class DocumentIngestor:
             }
             self.neo4j.run_query(chunk_query, params)
             
-        logger.info(f"Stored {len(chunks)} chunks for document {doc_id} in Neo4j")
+            # Create NEXT/PREV relationships between consecutive chunks
+            if prev_chunk_id is not None:
+                relationship_query = """
+                MATCH (prev:Chunk {id: $prev_chunk_id}), (curr:Chunk {id: $curr_chunk_id})
+                MERGE (prev)-[:NEXT]->(curr)
+                MERGE (curr)-[:PREV]->(prev)
+                """
+                relationship_params = {
+                    "prev_chunk_id": prev_chunk_id,
+                    "curr_chunk_id": chunk_id
+                }
+                self.neo4j.run_query(relationship_query, relationship_params)
+                
+            prev_chunk_id = chunk_id
+            
+        logger.info(f"Stored {len(chunks)} chunks for document {doc_id} in Neo4j with NEXT/PREV relationships")
         
     def store_embeddings_in_qdrant(self, doc_id: str, chunks: List[str], 
                                 embeddings: np.ndarray) -> None:

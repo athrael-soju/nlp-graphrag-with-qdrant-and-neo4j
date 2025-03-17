@@ -373,6 +373,149 @@ class GraphRetriever(Retriever):
         logger.info(f"Retrieved {len(results)} chunks via graph-based methods")
         return results
 
+    def get_next_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Get the next chunk in a document chain using NEXT relationship
+        
+        Args:
+            chunk_id: Current chunk identifier
+            
+        Returns:
+            Optional[Dict[str, Any]]: Next chunk information or None if no next chunk exists
+        """
+        logger.info(f"Getting next chunk for: {chunk_id}")
+        
+        result = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})-[:NEXT]->(next:Chunk)
+            RETURN next.id AS id, next.text AS text, next.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if result and len(result) > 0:
+            return result[0]
+        return None
+        
+    def get_prev_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Get the previous chunk in a document chain using PREV relationship
+        
+        Args:
+            chunk_id: Current chunk identifier
+            
+        Returns:
+            Optional[Dict[str, Any]]: Previous chunk information or None if no previous chunk exists
+        """
+        logger.info(f"Getting previous chunk for: {chunk_id}")
+        
+        result = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})-[:PREV]->(prev:Chunk)
+            RETURN prev.id AS id, prev.text AS text, prev.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if result and len(result) > 0:
+            return result[0]
+        return None
+        
+    def get_document_chain(self, chunk_id: str, max_chunks: int = 5) -> List[Dict[str, Any]]:
+        """Get a sequence of chunks in both directions around the specified chunk
+        
+        Args:
+            chunk_id: Center chunk identifier
+            max_chunks: Maximum number of chunks to retrieve in each direction
+            
+        Returns:
+            List[Dict[str, Any]]: List of chunks in sequence order
+        """
+        logger.info(f"Getting document chain centered on: {chunk_id}, max_chunks: {max_chunks}")
+        
+        # Get current chunk
+        current = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})
+            RETURN c.id AS id, c.text AS text, c.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if not current:
+            logger.warning(f"Chunk {chunk_id} not found")
+            return []
+            
+        current_chunk = current[0]
+        result = [current_chunk]
+        
+        # Get previous chunks
+        prev_id = chunk_id
+        for _ in range(max_chunks):
+            prev_chunk = self.get_prev_chunk(prev_id)
+            if prev_chunk:
+                result.insert(0, prev_chunk)  # Insert at beginning to maintain order
+                prev_id = prev_chunk["id"]
+            else:
+                break
+                
+        # Get next chunks
+        next_id = chunk_id
+        for _ in range(max_chunks):
+            next_chunk = self.get_next_chunk(next_id)
+            if next_chunk:
+                result.append(next_chunk)  # Append at end to maintain order
+                next_id = next_chunk["id"]
+            else:
+                break
+                
+        return result
+
+    def retrieve_with_context(self, query: str, top_k: int = 10, context_size: int = 2) -> List[Dict[str, Any]]:
+        """Retrieve chunks relevant to a query with surrounding context chunks
+        
+        Args:
+            query: User query
+            top_k: Number of top chunks to retrieve
+            context_size: Number of chunks to include before and after each matched chunk
+            
+        Returns:
+            List[Dict[str, Any]]: List of chunks with context
+        """
+        logger.info(f"Retrieving with context: query='{query}', top_k={top_k}, context_size={context_size}")
+        
+        # First perform standard vector search
+        base_results = self.retrieve_chunks(query, top_k)
+        
+        # Create a set to track unique chunk IDs
+        seen_chunks = set()
+        
+        # For each result, get the document chain
+        contextualized_results = []
+        
+        for result in base_results:
+            # Extract data from the tuple (chunk_id, chunk_text, score)
+            chunk_id, chunk_text, score = result
+            
+            if chunk_id in seen_chunks:
+                continue
+                
+            # Get context chunks
+            chain = self.get_document_chain(chunk_id, context_size)
+            
+            # Add a flag to indicate which chunk was the direct match
+            for chunk in chain:
+                chunk_in_list = chunk.copy()  # Create a copy to avoid modifying the original
+                chunk_in_list["is_match"] = (chunk["id"] == chunk_id)
+                chunk_in_list["score"] = score if chunk["id"] == chunk_id else 0.0
+                
+                if chunk["id"] not in seen_chunks:
+                    contextualized_results.append(chunk_in_list)
+                    seen_chunks.add(chunk["id"])
+        
+        # Sort by original vector search score (matched chunks will be at the top)
+        contextualized_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        return contextualized_results
+
 
 class HybridRetriever(Retriever):
     """Hybrid retrieval combining vector and graph-based approaches"""
@@ -522,6 +665,57 @@ def hybrid_retrieve_with_triplets(query: str, top_k: int = 5) -> Dict[str, Any]:
     """Retrieve chunks and related triplets using hybrid approach"""
     retriever = HybridRetriever()
     return retriever.retrieve_with_triplets(query, top_k)
+
+def get_next_chunk(chunk_id: str) -> Optional[Dict[str, Any]]:
+    """Get the next chunk in a document chain using NEXT relationship (standalone function)
+    
+    Args:
+        chunk_id: Current chunk identifier
+        
+    Returns:
+        Optional[Dict[str, Any]]: Next chunk information or None if no next chunk exists
+    """
+    retriever = GraphRetriever()
+    return retriever.get_next_chunk(chunk_id)
+    
+def get_prev_chunk(chunk_id: str) -> Optional[Dict[str, Any]]:
+    """Get the previous chunk in a document chain using PREV relationship (standalone function)
+    
+    Args:
+        chunk_id: Current chunk identifier
+        
+    Returns:
+        Optional[Dict[str, Any]]: Previous chunk information or None if no previous chunk exists
+    """
+    retriever = GraphRetriever()
+    return retriever.get_prev_chunk(chunk_id)
+    
+def get_document_chain(chunk_id: str, max_chunks: int = 5) -> List[Dict[str, Any]]:
+    """Get a sequence of chunks in both directions around the specified chunk (standalone function)
+    
+    Args:
+        chunk_id: Center chunk identifier
+        max_chunks: Maximum number of chunks to retrieve in each direction
+        
+    Returns:
+        List[Dict[str, Any]]: List of chunks in sequence order
+    """
+    retriever = GraphRetriever()
+    return retriever.get_document_chain(chunk_id, max_chunks)
+
+def retrieve_with_context(query: str, top_k: int = 10, context_size: int = 2) -> List[Dict[str, Any]]:
+    """Retrieve chunks relevant to a query with surrounding context chunks (standalone function)
+    
+    Args:
+        query: User query
+        top_k: Number of top chunks to retrieve
+        context_size: Number of chunks to include before and after each matched chunk
+        
+    Returns:
+        List[Dict[str, Any]]: List of chunks with context
+    """
+    retriever = GraphRetriever()
+    return retriever.retrieve_with_context(query, top_k, context_size)
 
 if __name__ == "__main__":
     # Setup logging
