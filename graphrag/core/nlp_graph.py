@@ -6,7 +6,7 @@ import logging
 import nltk
 from typing import List, Tuple, Optional
 from itertools import chain
-from graphrag.neo4j_connection import get_connection
+from graphrag.connectors.neo4j_connection import get_connection
 
 # Initialize logger
 logger = logging.getLogger(__name__)

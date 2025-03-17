@@ -8,12 +8,12 @@ import logging
 import argparse
 from typing import List, Dict, Any, Optional, Union
 
-from graphrag.neo4j_connection import get_connection as get_neo4j_connection
-from graphrag.qdrant_connection import get_connection as get_qdrant_connection
-from graphrag.ingest import process_document
-from graphrag.nlp_graph import process_chunk
-from graphrag.triplets import process_chunk as process_chunk_triplets
-from graphrag.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets
+from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
+from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.core.ingest import process_document
+from graphrag.core.nlp_graph import process_chunk
+from graphrag.core.triplets import process_chunk as process_chunk_triplets
+from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets
 
 # Setup logging
 logging.basicConfig(level=logging.INFO,

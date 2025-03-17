@@ -8,8 +8,8 @@ import numpy as np
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
 from sentence_transformers import SentenceTransformer
-from graphrag.neo4j_connection import get_connection as get_neo4j_connection
-from graphrag.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
+from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
 
 # Initialize logger
 logger = logging.getLogger(__name__)

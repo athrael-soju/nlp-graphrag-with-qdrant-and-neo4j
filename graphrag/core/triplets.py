@@ -2,7 +2,7 @@ import re
 import logging
 import nltk
 from typing import List, Tuple, Dict, Any
-from graphrag.neo4j_connection import get_connection
+from graphrag.connectors.neo4j_connection import get_connection
 
 try:
     from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
