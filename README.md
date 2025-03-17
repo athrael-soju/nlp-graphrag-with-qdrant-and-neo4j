@@ -69,7 +69,32 @@ graphrag interactive
 
 ## Configuration
 
-By default, GraphRAG connects to Neo4j at `bolt://localhost:7687` with the credentials `neo4j/testpassword`. You can modify these settings by editing the connection parameters in `graphrag/neo4j_connection.py`.
+GraphRAG uses environment variables for configuration. You can set these in a `.env` file in the project root directory:
+
+```
+# Neo4j Connection Settings
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=testpassword
+
+# Qdrant Connection Settings
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+
+# Database Collection Settings
+QDRANT_COLLECTION_NAME=tokens
+VECTOR_SIZE=768
+
+# Model Settings
+TRIPLET_MODEL=bew/t5_sentence_to_triplet_xl
+EMBEDDING_MODEL=intfloat/e5-base-v2
+
+# Processing Settings
+MAX_TOKENS_PER_CHUNK=200
+TOP_K_RETRIEVAL=10
+```
+
+You can modify these settings to customize the behavior of GraphRAG without changing the code.
 
 ## Architecture
 

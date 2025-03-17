@@ -4,18 +4,23 @@ Shared utilities for GraphRAG
 
 import logging
 import numpy as np
+import os
 from typing import List, Union
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Default embedding model
-DEFAULT_EMBEDDING_MODEL = 'intfloat/e5-base-v2'
+# Default embedding model from environment variables
+DEFAULT_EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'intfloat/e5-base-v2')
 
 # Global cache for embedding models to avoid reloading
 _embedding_models = {}
 
-def get_embedding_model(model_name=DEFAULT_EMBEDDING_MODEL):
+def get_embedding_model(model_name=None):
     """Get or load an embedding model
     
     Args:
@@ -25,6 +30,9 @@ def get_embedding_model(model_name=DEFAULT_EMBEDDING_MODEL):
         SentenceTransformer model instance
     """
     global _embedding_models
+    
+    # Use environment variable if not provided
+    model_name = model_name or DEFAULT_EMBEDDING_MODEL
     
     if model_name in _embedding_models:
         return _embedding_models[model_name]
@@ -40,7 +48,7 @@ def get_embedding_model(model_name=DEFAULT_EMBEDDING_MODEL):
         logger.error(f"Failed to load embedding model {model_name}: {str(e)}")
         raise
 
-def embed_text(text: Union[str, List[str]], model_name=DEFAULT_EMBEDDING_MODEL, 
+def embed_text(text: Union[str, List[str]], model_name=None, 
                 prefix=None, normalize=True) -> np.ndarray:
     """Generate embeddings for text
     
@@ -53,6 +61,9 @@ def embed_text(text: Union[str, List[str]], model_name=DEFAULT_EMBEDDING_MODEL,
     Returns:
         np.ndarray: Text embedding(s)
     """
+    # Use environment variable if not provided
+    model_name = model_name or DEFAULT_EMBEDDING_MODEL
+    
     model = get_embedding_model(model_name)
     
     # Handle single string vs list

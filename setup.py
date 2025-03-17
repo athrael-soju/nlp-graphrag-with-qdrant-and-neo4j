@@ -30,6 +30,7 @@ setup(
         "pyspark",  # Optional: for Spark NLP
         "spark-nlp",  # Optional: for Spark NLP 
         "qdrant-client",
+        "python-dotenv",  # For loading environment variables
     ],
     entry_points={
         "console_scripts": [

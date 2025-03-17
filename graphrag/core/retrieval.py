@@ -402,9 +402,9 @@ class HybridRetriever(Retriever):
         Returns:
             List[Tuple[str, str, float]]: List of (chunk_id, chunk_text, score) tuples
         """
-        # Get results from both retrievers
-        vector_results = self.vector_retriever.retrieve_chunks(query, top_k=top_k*2)
-        graph_results = self.graph_retriever.retrieve_chunks(query, top_k=top_k*2)
+        # Get results from both retrievers - use exactly top_k to respect user settings
+        vector_results = self.vector_retriever.retrieve_chunks(query, top_k=top_k)
+        graph_results = self.graph_retriever.retrieve_chunks(query, top_k=top_k)
         
         # Normalize scores separately
         def normalize_scores(results):
@@ -413,8 +413,8 @@ class HybridRetriever(Retriever):
             
             # Extract scores
             scores = [score for _, _, score in results]
-            min_score = min(scores)
-            max_score = max(scores)
+            min_score = min(scores) if scores else 0
+            max_score = max(scores) if scores else 1
             
             # Avoid division by zero
             if max_score == min_score:
@@ -486,7 +486,10 @@ class HybridRetriever(Retriever):
         for entity in entity_candidates:
             relation_keyword = ""  # Get all relations
             triplets = self.graph_retriever.relationship_search(entity, relation_keyword)
-            triplet_results.extend(triplets)
+            triplet_results.extend(triplets[:top_k])  # Limit triplets to top_k per entity
+            
+        # Ensure we don't return more than top_k triplets total
+        triplet_results = triplet_results[:top_k]
             
         return {
             "chunks": chunk_results,

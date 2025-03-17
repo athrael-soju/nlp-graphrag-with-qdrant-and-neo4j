@@ -1,9 +1,14 @@
 import re
 import logging
 import nltk
+import os
 from typing import List, Tuple, Dict, Any
+from dotenv import load_dotenv
 from graphrag.connectors.neo4j_connection import get_connection
 from graphrag.utils.common import embed_text
+
+# Load environment variables
+load_dotenv()
 
 try:
     from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -20,14 +25,14 @@ try:
 except Exception as e:
     logger.warning(f"Failed to download NLTK resources: {str(e)}")
 
-# Default model for triplet extraction
-DEFAULT_TRIPLET_MODEL = "bew/t5_sentence_to_triplet_xl"
+# Default model for triplet extraction from environment variables
+DEFAULT_TRIPLET_MODEL = os.getenv('TRIPLET_MODEL', 'bew/t5_sentence_to_triplet_xl')
 
 
 class TripletExtractor:
     """Extract subject-relation-object triplets from text and map them into a Neo4j knowledge graph."""
 
-    def __init__(self, neo4j_conn=None, model_name=DEFAULT_TRIPLET_MODEL):
+    def __init__(self, neo4j_conn=None, model_name=None):
         """
         Initialize the triplet extractor.
 
@@ -35,6 +40,9 @@ class TripletExtractor:
             neo4j_conn: A Neo4j connection instance.
             model_name: Hugging Face model name for triplet extraction.
         """
+        # Use environment variable if not provided
+        model_name = model_name or DEFAULT_TRIPLET_MODEL
+        
         if AutoTokenizer is None or AutoModelForSeq2SeqLM is None:
             raise ImportError(
                 "Transformers library is required for triplet extraction. "
