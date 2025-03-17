@@ -33,7 +33,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "graphrag=graphrag.cli.main:main",
+            "graphrag=graphrag.main:main",
         ],
     },
 ) 
