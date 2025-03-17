@@ -3,6 +3,7 @@ import logging
 import nltk
 from typing import List, Tuple, Dict, Any
 from graphrag.connectors.neo4j_connection import get_connection
+from graphrag.utils.common import embed_text
 
 try:
     from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -21,18 +22,6 @@ except Exception as e:
 
 # Default model for triplet extraction
 DEFAULT_TRIPLET_MODEL = "bew/t5_sentence_to_triplet_xl"
-
-
-# Placeholder for the embedding function
-def embed_query_on_gpu(text: str):
-    """
-    Replace this placeholder with your actual GPU-accelerated embedding code.
-    For demonstration, it returns a dummy vector.
-    """
-    import numpy as np
-
-    # Assuming the embedding dimension is 768; adjust as needed.
-    return np.random.rand(768)
 
 
 class TripletExtractor:
@@ -241,9 +230,9 @@ class TripletExtractor:
         subject, predicate, object_ = triplet
 
         # Compute embeddings for each component
-        subject_emb = embed_query_on_gpu(subject)
-        predicate_emb = embed_query_on_gpu(predicate)
-        object_emb = embed_query_on_gpu(object_)
+        subject_emb = embed_text(subject)
+        predicate_emb = embed_text(predicate)
+        object_emb = embed_text(object_)
 
         params = {
             "subject_emb": subject_emb.tolist(),
@@ -264,14 +253,14 @@ class TripletExtractor:
             try:
                 similarSubjects_query = """
                 CALL {
-                    CALL db.index.vector.queryNodes('vector_index_token', 10, $subject_emb)
+                    CALL db.index.vector.queryNodes('vector_index_entity', 10, $subject_emb)
                     YIELD node AS vectorNode, score as vectorScore
                     WITH vectorNode, vectorScore
                     WHERE vectorScore >= 0.96
                     RETURN collect(vectorNode) AS similarSubjects
                 }
                 WITH similarSubjects
-                OPTIONAL MATCH (n:Token {name: toLower($subject)})
+                OPTIONAL MATCH (n:Entity {name: toLower($subject)})
                 WITH similarSubjects + CASE WHEN n IS NULL THEN [] ELSE [n] END AS allSubjects
                 UNWIND allSubjects AS subject
                 RETURN collect(subject) AS similarSubjects
@@ -283,14 +272,14 @@ class TripletExtractor:
                 # Find similar predicate nodes
                 similarPredicates_query = """
                 CALL {
-                    CALL db.index.vector.queryNodes('vector_index_token', 10, $predicate_emb)
+                    CALL db.index.vector.queryNodes('vector_index_entity', 10, $predicate_emb)
                     YIELD node AS vectorNode, score as vectorScore
                     WITH vectorNode, vectorScore
                     WHERE vectorScore >= 0.96
                     RETURN collect(vectorNode) AS similarPredicates
                 }
                 WITH similarPredicates
-                OPTIONAL MATCH (n:Token {name: toLower($predicate)})
+                OPTIONAL MATCH (n:Entity {name: toLower($predicate)})
                 WITH similarPredicates + CASE WHEN n IS NULL THEN [] ELSE [n] END AS allPredicates
                 UNWIND allPredicates AS predicate
                 RETURN collect(predicate) AS similarPredicates
@@ -302,14 +291,14 @@ class TripletExtractor:
                 # Find similar object nodes
                 similarObjects_query = """
                 CALL {
-                    CALL db.index.vector.queryNodes('vector_index_token', 10, $object_emb)
+                    CALL db.index.vector.queryNodes('vector_index_entity', 10, $object_emb)
                     YIELD node AS vectorNode, score as vectorScore
                     WITH vectorNode, vectorScore
                     WHERE vectorScore >= 0.96
                     RETURN collect(vectorNode) AS similarObjects
                 }
                 WITH similarObjects
-                OPTIONAL MATCH (n:Token {name: toLower($object)})
+                OPTIONAL MATCH (n:Entity {name: toLower($object)})
                 WITH similarObjects + CASE WHEN n IS NULL THEN [] ELSE [n] END AS allObjects
                 UNWIND allObjects AS object
                 RETURN collect(object) AS similarObjects
@@ -327,7 +316,7 @@ class TripletExtractor:
         if not self.supports_vector:
             # Use exact match for subjects
             exact_subject_query = """
-            OPTIONAL MATCH (n:Token {name: toLower($subject)})
+            OPTIONAL MATCH (n:Entity {name: toLower($subject)})
             RETURN CASE WHEN n IS NULL THEN [] ELSE [n] END AS similarSubjects
             """
             similarSubjects = self.neo4j.run_query(exact_subject_query, params)[0][
@@ -336,7 +325,7 @@ class TripletExtractor:
 
             # Use exact match for predicates
             exact_predicate_query = """
-            OPTIONAL MATCH (n:Token {name: toLower($predicate)})
+            OPTIONAL MATCH (n:Entity {name: toLower($predicate)})
             RETURN CASE WHEN n IS NULL THEN [] ELSE [n] END AS similarPredicates
             """
             similarPredicates = self.neo4j.run_query(exact_predicate_query, params)[0][
@@ -345,7 +334,7 @@ class TripletExtractor:
 
             # Use exact match for objects
             exact_object_query = """
-            OPTIONAL MATCH (n:Token {name: toLower($object)})
+            OPTIONAL MATCH (n:Entity {name: toLower($object)})
             RETURN CASE WHEN n IS NULL THEN [] ELSE [n] END AS similarObjects
             """
             similarObjects = self.neo4j.run_query(exact_object_query, params)[0][
@@ -362,15 +351,15 @@ class TripletExtractor:
 
         # If any of the collections are empty, we need to ensure we create nodes
         create_query = """
-        MERGE (subjectNode:Token {name: toLower($subject)})
+        MERGE (subjectNode:Entity {name: toLower($subject)})
         ON CREATE SET subjectNode.embeddings = $subject_emb, subjectNode.triplet_part = 'subject'
         ON MATCH SET subjectNode.triplet_part = 'subject'
         
-        MERGE (objectNode:Token {name: toLower($object)})
+        MERGE (objectNode:Entity {name: toLower($object)})
         ON CREATE SET objectNode.embeddings = $object_emb, objectNode.triplet_part = 'object'
         ON MATCH SET objectNode.triplet_part = 'object'
         
-        MERGE (subjectNode)-[r:predicate {name: toLower($predicate)}]->(objectNode)
+        MERGE (subjectNode)-[r:RELATES_TO {name: toLower($predicate)}]->(objectNode)
         ON CREATE SET r.label = 'triplet', r.embeddings = $predicate_emb
         ON MATCH SET r.label = 'triplet'
         
@@ -386,13 +375,13 @@ class TripletExtractor:
             UNWIND $similarPredicates AS predicate
             UNWIND $similarObjects AS object
             WITH subject.name AS subjectName, predicate.name AS predicateName, object.name AS objectName, subject, predicate, object
-            MERGE (subjectNode:Token {name: toLower(subjectName)})
+            MERGE (subjectNode:Entity {name: toLower(subjectName)})
             ON CREATE SET subjectNode.embeddings = $subject_emb, subjectNode.triplet_part = 'subject'
             ON MATCH SET subjectNode.triplet_part = 'subject'
-            MERGE (objectNode:Token {name: toLower(objectName)})
+            MERGE (objectNode:Entity {name: toLower(objectName)})
             ON CREATE SET objectNode.embeddings = $object_emb, objectNode.triplet_part = 'object'
             ON MATCH SET objectNode.triplet_part = 'object'
-            MERGE (subjectNode)-[r:predicate {name: toLower(predicateName)}]->(objectNode)
+            MERGE (subjectNode)-[r:RELATES_TO {name: toLower(predicateName)}]->(objectNode)
                 ON CREATE SET r.label = 'triplet', r.embeddings = $predicate_emb
                 ON MATCH SET r.label = 'triplet'
             RETURN subjectName AS subject, predicateName AS predicate, objectName AS object

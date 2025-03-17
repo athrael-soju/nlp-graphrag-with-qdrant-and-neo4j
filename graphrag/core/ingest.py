@@ -13,9 +13,9 @@ try:
 except ImportError:
     fitz = None
 
-from sentence_transformers import SentenceTransformer
 from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
 from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -25,9 +25,6 @@ try:
     nltk.download('punkt', quiet=True)
 except Exception as e:
     logger.warning(f"Failed to download NLTK resources: {str(e)}")
-
-# Default embedding model
-DEFAULT_EMBEDDING_MODEL = 'intfloat/e5-base-v2'
 
 class DocumentIngestor:
     """Handles document loading, processing, and storage in Neo4j and Qdrant"""
@@ -42,9 +39,8 @@ class DocumentIngestor:
         """
         self.neo4j = neo4j_conn or get_neo4j_connection()
         self.qdrant = qdrant_conn or get_qdrant_connection()
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedding_model = SentenceTransformer(embedding_model)
-        logger.info("Embedding model loaded successfully")
+        self.embedding_model = embedding_model
+        logger.info(f"Using embedding model: {embedding_model}")
         
     def load_pdf(self, path: str) -> str:
         """Load text from a PDF file
@@ -126,11 +122,8 @@ class DocumentIngestor:
             
         logger.info(f"Generating embeddings for {len(chunks)} chunks")
         try:
-            # Add "passage: " prefix to each chunk as required by E5 model
-            prefixed_chunks = [f"passage: {ch}" for ch in chunks]
-            embeddings = self.embedding_model.encode(prefixed_chunks, 
-                                               normalize_embeddings=True,
-                                               show_progress_bar=len(chunks) > 10)
+            # Use shared embedding utility with E5 passage prefix
+            embeddings = embed_text(chunks, model_name=self.embedding_model, normalize=True)
             logger.info(f"Successfully generated embeddings of shape {embeddings.shape}")
             return embeddings
         except Exception as e:

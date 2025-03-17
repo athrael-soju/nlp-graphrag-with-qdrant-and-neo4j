@@ -78,9 +78,31 @@ GraphRAG consists of several key components:
 1. **Document Ingestion** - Loads text/PDF files and splits them into manageable chunks
 2. **Vector Indexing** - Embeds text chunks using a transformer model (default: E5-base)
 3. **Term Graph Construction** - Extracts tokens, bigrams, and trigrams, linking them to chunks
-4. **Triplet Extraction** - Uses a T5 model to identify subject-relation-object triplets
-5. **Hybrid Retrieval** - Combines vector similarity with graph traversal for better context
-6. **CLI Interface** - Provides command-line tools for processing and querying
+4. **Entity Extraction** - Creates entity nodes from subjects and objects in text
+5. **Triplet Extraction** - Uses a T5 model to identify subject-relation-object triplets
+6. **Hybrid Retrieval** - Combines vector similarity with graph traversal for better context
+7. **CLI Interface** - Provides command-line tools for processing and querying
+
+The system follows a modular design with the following structure:
+
+```
+graphrag/
+├── core/           # Core functionality
+│   ├── ingest.py   # Document ingestion
+│   ├── retrieval.py # Retrieval mechanisms
+│   ├── nlp_graph.py # Graph construction
+│   └── triplets.py  # Triplet extraction
+├── connectors/     # Database connectors
+│   ├── neo4j_connection.py
+│   └── qdrant_connection.py
+├── models/         # ML models and embeddings
+├── utils/          # Utility functions
+│   ├── common.py   # Shared utilities like embedding
+│   └── config.py   # Configuration
+├── cli/            # Command-line interface
+│   └── main.py
+├── data/           # Data handling
+```
 
 ## Advanced Usage
 

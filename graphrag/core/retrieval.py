@@ -7,15 +7,12 @@ import logging
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
-from sentence_transformers import SentenceTransformer
 from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
 from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Default embedding model
-DEFAULT_EMBEDDING_MODEL = 'intfloat/e5-base-v2'
 
 class Retriever:
     """Base class for retrieval in GraphRAG"""
@@ -79,9 +76,8 @@ class VectorRetriever(Retriever):
             embedding_model: Name or path of the embedding model
         """
         super().__init__(neo4j_conn, qdrant_conn)
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedding_model = SentenceTransformer(embedding_model)
-        logger.info("Embedding model loaded successfully")
+        self.embedding_model = embedding_model
+        logger.info(f"Using embedding model: {embedding_model}")
         
     def embed_query(self, query: str) -> np.ndarray:
         """Embed a query
@@ -96,21 +92,19 @@ class VectorRetriever(Retriever):
         logger.info(f"Embedding query: {query}")
         
         try:
-            # E5 models expect "query: " prefix
-            # Check if model name contains 'e5'
-            model_name = str(self.embedding_model).lower()
-            if 'e5' in model_name:
-                query = f"query: {query}"
-                logger.info(f"Using E5 prefix: {query}")
-            
-            # Encode the query and normalize
-            query_embedding = self.embedding_model.encode([query], normalize_embeddings=True)[0]
+            # Use shared embedding utility with query prefix
+            query_embedding = embed_text(query, model_name=self.embedding_model, prefix="query:", normalize=True)
             logger.info(f"Query embedding shape: {query_embedding.shape}")
             return query_embedding
         except Exception as e:
             logger.error(f"Error embedding query: {str(e)}")
+            # Find dimension of the model's embeddings
+            try:
+                from sentence_transformers import SentenceTransformer
+                dim = SentenceTransformer(self.embedding_model).get_sentence_embedding_dimension()
+            except:
+                dim = 768  # Default fallback
             # Return a zero vector as fallback
-            dim = self.embedding_model.get_sentence_embedding_dimension()
             return np.zeros(dim)
     
     def retrieve_chunks(self, query: str, top_k: int = 5) -> List[Tuple[str, str, float]]:
@@ -283,25 +277,21 @@ class GraphRetriever(Retriever):
         """
         logger.info(f"Relationship search for entity: {entity_name}, relation: {relation_keyword}")
         
-        # Prepare relation pattern for filtering
-        rel_pattern = f".*{relation_keyword}.*" if relation_keyword else None
-        
         # Query Neo4j for relationships
-        if rel_pattern:
+        if relation_keyword:
             result = self.neo4j.run_query(
                 """
-                MATCH (s:Entity)-[r]->(o:Entity)
-                WHERE s.name = $name AND type(r) =~ $rel
-                RETURN s.name AS subject, type(r) AS relation, o.name AS object, r.source AS chunk_id
+                MATCH (s:Entity {name: $name})-[r:RELATES_TO]->(o:Entity)
+                WHERE r.name =~ $rel
+                RETURN s.name AS subject, r.name AS relation, o.name AS object, r.source AS chunk_id
                 """,
-                {"name": entity_name, "rel": rel_pattern}
+                {"name": entity_name, "rel": f"(?i).*{relation_keyword}.*"}
             )
         else:
             result = self.neo4j.run_query(
                 """
-                MATCH (s:Entity)-[r]->(o:Entity)
-                WHERE s.name = $name
-                RETURN s.name AS subject, type(r) AS relation, o.name AS object, r.source AS chunk_id
+                MATCH (s:Entity {name: $name})-[r:RELATES_TO]->(o:Entity)
+                RETURN s.name AS subject, r.name AS relation, o.name AS object, r.source AS chunk_id
                 """,
                 {"name": entity_name}
             )
