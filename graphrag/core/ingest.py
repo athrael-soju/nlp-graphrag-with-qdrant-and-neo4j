@@ -169,7 +169,9 @@ class DocumentIngestor:
             # Create NEXT/PREV relationships between consecutive chunks
             if prev_chunk_id is not None:
                 relationship_query = """
-                MATCH (prev:Chunk {id: $prev_chunk_id}), (curr:Chunk {id: $curr_chunk_id})
+                MATCH (prev:Chunk {id: $prev_chunk_id})
+                WITH prev
+                MATCH (curr:Chunk {id: $curr_chunk_id})
                 MERGE (prev)-[:NEXT]->(curr)
                 MERGE (curr)-[:PREV]->(prev)
                 """
