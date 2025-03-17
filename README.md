@@ -6,6 +6,8 @@ GraphRAG is a Python system that implements a knowledge graph enhanced retrieval
 
 - Document ingestion from plain text or PDF files
 - Automated chunking and embedding of text segments 
+- Document chain modeling with NEXT/PREV relationships between sequential chunks
+- Context-aware retrieval that provides surrounding chunks for better context
 - NLP-powered knowledge graph construction with:
   - Term nodes (tokens, n-grams) linked to document chunks
   - Entity-relationship triplets extracted from text
@@ -25,6 +27,12 @@ docker run -d --name neo4j -p 7474:7474 -p 7687:7687 \
 ```
 
 Or install Neo4j directly from [neo4j.com](https://neo4j.com/download/).
+
+GraphRAG also uses Qdrant for vector similarity search, which can be run with Docker:
+
+```bash
+docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+```
 
 ### Install GraphRAG
 
@@ -63,6 +71,12 @@ graphrag process file1.txt file2.txt file3.txt
 # Run a single query
 graphrag query "What type of business is Hugging Face?"
 
+# Use context-aware retrieval
+graphrag query "What type of business is Hugging Face?" --with-context
+
+# Customize context window size
+graphrag query "What type of business is Hugging Face?" --with-context --context-size 3
+
 # Start interactive session
 graphrag interactive
 ```
@@ -92,21 +106,32 @@ EMBEDDING_MODEL=intfloat/e5-base-v2
 # Processing Settings
 MAX_TOKENS_PER_CHUNK=200
 TOP_K_RETRIEVAL=10
+WITH_CONTEXT=False
+CONTEXT_SIZE=2
 ```
 
 You can modify these settings to customize the behavior of GraphRAG without changing the code.
+
+### Context Settings
+
+- `WITH_CONTEXT`: When set to `True`, enables context-aware retrieval by default (can be overridden with `--no-context` flag)
+- `CONTEXT_SIZE`: Number of chunks to include before and after each matching chunk (default: 2)
+
+Context-aware retrieval leverages the document structure by returning not just the matching chunks, but also the surrounding chunks (previous and next) to provide better context for the LLM.
 
 ## Architecture
 
 GraphRAG consists of several key components:
 
 1. **Document Ingestion** - Loads text/PDF files and splits them into manageable chunks
-2. **Vector Indexing** - Embeds text chunks using a transformer model (default: E5-base)
-3. **Term Graph Construction** - Extracts tokens, bigrams, and trigrams, linking them to chunks
-4. **Entity Extraction** - Creates entity nodes from subjects and objects in text
-5. **Triplet Extraction** - Uses a T5 model to identify subject-relation-object triplets
-6. **Hybrid Retrieval** - Combines vector similarity with graph traversal for better context
-7. **CLI Interface** - Provides command-line tools for processing and querying
+2. **Document Chaining** - Creates NEXT/PREV relationships between sequential chunks
+3. **Vector Indexing** - Embeds text chunks using a transformer model (default: E5-base)
+4. **Term Graph Construction** - Extracts tokens, bigrams, and trigrams, linking them to chunks
+5. **Entity Extraction** - Creates entity nodes from subjects and objects in text
+6. **Triplet Extraction** - Uses a T5 model to identify subject-relation-object triplets
+7. **Hybrid Retrieval** - Combines vector similarity with graph traversal for better context
+8. **Context-aware Retrieval** - Includes surrounding chunks in results to provide more coherent context
+9. **CLI Interface** - Provides command-line tools for processing and querying
 
 The system follows a modular design with the following structure:
 
@@ -131,6 +156,35 @@ graphrag/
 
 ## Advanced Usage
 
+### Context-Aware Retrieval
+
+GraphRAG's context-aware retrieval enhances traditional RAG by maintaining the flow of information from the source documents:
+
+```bash
+# Enable context-aware retrieval
+graphrag query "Who is Hitomi Kanzaki?" --with-context
+
+# Increase context window size (chunks before/after matches)
+graphrag query "Who is Hitomi Kanzaki?" --with-context --context-size 5
+```
+
+In the output, matches are marked with 🔍 MATCH and context chunks with 📄 CONTEXT.
+
+### Interactive Mode with Context
+
+You can also use context-aware retrieval in interactive mode:
+
+```bash
+graphrag interactive
+
+# In the interactive session:
+GraphRAG> set context on
+Set context to on
+GraphRAG> set context_size 3
+Set context_size to 3
+GraphRAG> Who is Van Fanel?
+```
+
 ### Using Spark NLP for Large-Scale Processing (Optional)
 
 For processing large document collections, GraphRAG can use Spark NLP for distributed NLP processing. Install the additional dependencies:
@@ -147,23 +201,38 @@ To accelerate embedding and triplet extraction, ensure you have PyTorch installe
 
 ## Examples
 
-### Process a document about a tech company:
+### Process a document about a fantasy anime:
 
 ```bash
-echo "Hugging Face, Inc. is an American company that develops tools for building applications using machine learning. It was founded in 2016 and its headquarters is in New York City." > huggingface.txt
+echo "The story of Escaflowne is a captivating tale set in the mystical world of Gaea, where a young girl named Hitomi Kanzaki is transported from Earth. She finds herself in the middle of a conflict between the Zaibach Empire and the kingdom of Fanelia. Hitomi meets Van Fanel, the young king of Fanelia, who pilots the legendary mecha Escaflowne. Together, they embark on a journey to stop the Zaibach Empire's plans for domination, uncovering secrets about their pasts and the true power of Escaflowne." > escaflowne.txt
 
-graphrag process huggingface.txt
+graphrag process escaflowne.txt
 ```
 
-### Query the system:
+### Query with context-aware retrieval:
 
 ```bash
-graphrag query "Where is Hugging Face headquartered?"
+graphrag query "Who did Hitomi meet?" --with-context
 ```
 
-Output might include:
-- Retrieved chunks containing the headquarters information
-- A knowledge graph triplet: (Hugging Face, Inc.) -[HEADQUARTERS_IN]-> (New York City)
+Sample output:
+```
+================================================================================
+QUERY RESULTS:
+================================================================================
+
+Retrieved chunks with context:
+
+1. 🔍 MATCH: Chunk escaflowne_chunk1 (score: 0.852):
+----------------------------------------
+Hitomi meets Van Fanel, the young king of Fanelia, who pilots the legendary mecha Escaflowne. Together, they embark on a journey to stop the Zaibach Empire's plans for domination, uncovering secrets about their pasts and the true power of Escaflowne.
+
+2. 📄 CONTEXT: Chunk escaflowne_chunk0:
+----------------------------------------
+The story of Escaflowne is a captivating tale set in the mystical world of Gaea, where a young girl named Hitomi Kanzaki is transported from Earth. She finds herself in the middle of a conflict between the Zaibach Empire and the kingdom of Fanelia.
+
+================================================================================
+```
 
 ## Limitations
 

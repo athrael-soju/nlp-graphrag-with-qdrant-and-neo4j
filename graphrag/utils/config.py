@@ -46,20 +46,37 @@ def get_config(key: str, default: Optional[Any] = None) -> Any:
     reload_env()
     
     # Get from environment variables
-    env_value = os.getenv(key.upper(), default)
+    env_value = os.getenv(key.upper())
     
-    # Try to convert numeric values
-    if isinstance(env_value, str):
-        # Try to convert to int if possible
+    # If not found, return default
+    if env_value is None:
+        return default
+        
+    # Handle boolean values
+    if isinstance(default, bool):
+        # Convert string to boolean
+        if env_value.lower() in ('true', 'yes', '1', 'y', 'on'):
+            return True
+        elif env_value.lower() in ('false', 'no', '0', 'n', 'off'):
+            return False
+        # If not a recognized boolean string, use default
+        return default
+    
+    # Handle integer values
+    if isinstance(default, int):
         try:
-            if env_value.isdigit():
-                return int(env_value)
-            # Try to convert to float if possible
-            elif '.' in env_value and all(part.isdigit() for part in env_value.split('.', 1)):
-                return float(env_value)
+            return int(env_value)
         except ValueError:
-            pass
-    
+            return default
+            
+    # Handle float values
+    if isinstance(default, float):
+        try:
+            return float(env_value)
+        except ValueError:
+            return default
+            
+    # Return as string for other types
     return env_value
 
 def get_neo4j_config() -> Dict[str, Any]:
@@ -113,5 +130,7 @@ def get_process_config() -> Dict[str, Any]:
     """
     return {
         "max_tokens_per_chunk": get_config("MAX_TOKENS_PER_CHUNK", 200),
-        "top_k_retrieval": get_config("TOP_K_RETRIEVAL", 10)
+        "top_k_retrieval": get_config("TOP_K_RETRIEVAL", 10),
+        "with_context": get_config("WITH_CONTEXT", False),
+        "context_size": get_config("CONTEXT_SIZE", 2)
     }
