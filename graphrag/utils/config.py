@@ -48,9 +48,6 @@ def get_config(key: str, default: Optional[Any] = None) -> Any:
     # Get from environment variables
     env_value = os.getenv(key.upper())
     
-    # Debug logging
-    logger.info(f"Config: {key.upper()}={env_value}, default={default}, type(default)={type(default)}")
-    
     # If not found, return default
     if env_value is None:
         return default
@@ -59,13 +56,10 @@ def get_config(key: str, default: Optional[Any] = None) -> Any:
     if isinstance(default, bool):
         # Convert string to boolean
         if env_value.lower() in ('true', 'yes', '1', 'y', 'on'):
-            logger.info(f"Converting {key.upper()}={env_value} to boolean True")
             return True
         elif env_value.lower() in ('false', 'no', '0', 'n', 'off'):
-            logger.info(f"Converting {key.upper()}={env_value} to boolean False")
             return False
         # If not a recognized boolean string, use default
-        logger.warning(f"Unrecognized boolean value: {key.upper()}={env_value}, using default={default}")
         return default
     
     # Handle integer values

@@ -198,13 +198,17 @@ def query_graphrag(query: str, top_k: int = None, include_triplets: bool = True,
     try:
         # Context-aware retrieval
         if with_context:
+            logger.info(f"Using context-aware retrieval (with_context={with_context}, context_size={context_size})")
+            from graphrag.core.retrieval import retrieve_with_context
             results = retrieve_with_context(query, top_k=top_k, context_size=context_size)
             logger.info(f"Retrieved {len(results)} results with context (context_size={context_size})")
         # Standard retrieval methods
         elif include_triplets:
+            logger.info(f"Using triplet-enhanced retrieval (include_triplets={include_triplets})")
             results = hybrid_retrieve_with_triplets(query, top_k=top_k)
             logger.info(f"Retrieved {len(results)} results with triplets")
         else:
+            logger.info(f"Using standard vector retrieval")
             results = hybrid_retrieve(query, top_k=top_k)
             logger.info(f"Retrieved {len(results)} results")
             
@@ -233,16 +237,30 @@ def print_query_results(results: Dict[str, Any]):
     print("QUERY RESULTS:")
     print("="*80)
     
+    # Check if there was an error
+    if "error" in results:
+        print(f"\nError: {results['error']}")
+        return
+    
+    # Get the results data
+    result_data = results.get("results", [])
+    if not result_data:
+        print("\nNo results found.")
+        return
+    
     # Check if using context-aware retrieval
     with_context = results.get("with_context", False)
     
-    # Handle both direct results and results with triplets
-    result_data = results.get("results", [])
-    
-    # Check if we're using context-aware retrieval
+    # Context-aware retrieval results
     if with_context:
         print(f"\nRetrieved chunks with context:")
         for i, chunk in enumerate(result_data, 1):
+            # Verify this is actually a context-aware result by checking for required fields
+            if not isinstance(chunk, dict) or "is_match" not in chunk:
+                # Not a context result, fall back to standard format
+                with_context = False
+                break
+                
             # Determine if this is a direct match or context
             is_match = chunk.get("is_match", False)
             chunk_id = chunk.get("id", "unknown")
@@ -258,36 +276,38 @@ def print_query_results(results: Dict[str, Any]):
                 print("-" * 40)
             print(text)
     
-    # If result_data is a dictionary with 'chunks' key, it's from hybrid_retrieve_with_triplets
-    elif isinstance(result_data, dict) and "chunks" in result_data:
-        chunks = result_data.get("chunks", [])
-        triplets = result_data.get("triplets", [])
-        
-        # Print chunks
-        print(f"\nRetrieved {len(chunks)} relevant chunks:")
-        for i, (chunk_id, text, score) in enumerate(chunks, 1):
-            print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
-            print("-" * 40)
-            print(text)
+    # If not context results or we determined it's not actually context format
+    if not with_context:
+        # If result_data is a dictionary with 'chunks' key, it's from hybrid_retrieve_with_triplets
+        if isinstance(result_data, dict) and "chunks" in result_data:
+            chunks = result_data.get("chunks", [])
+            triplets = result_data.get("triplets", [])
             
-        # Print triplets if available
-        if triplets:
-            print("\n" + "="*80)
-            print(f"Found {len(triplets)} relevant knowledge graph triplets:")
-            print("="*80)
+            # Print chunks
+            print(f"\nRetrieved {len(chunks)} relevant chunks:")
+            for i, (chunk_id, text, score) in enumerate(chunks, 1):
+                print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
+                print("-" * 40)
+                print(text)
+                
+            # Print triplets if available
+            if triplets:
+                print("\n" + "="*80)
+                print(f"Found {len(triplets)} relevant knowledge graph triplets:")
+                print("="*80)
+                
+                for i, (subj, rel, obj, chunk_id, _) in enumerate(triplets, 1):
+                    print(f"{i}. {subj} --[{rel}]--> {obj}  (source: {chunk_id})")
+        else:
+            # Otherwise it's a direct list of chunks from hybrid_retrieve
+            chunks = result_data
             
-            for i, (subj, rel, obj, chunk_id, _) in enumerate(triplets, 1):
-                print(f"{i}. {subj} --[{rel}]--> {obj}  (source: {chunk_id})")
-    else:
-        # Otherwise it's a direct list of chunks from hybrid_retrieve
-        chunks = result_data
-        
-        # Print chunks
-        print(f"\nRetrieved {len(chunks)} relevant chunks:")
-        for i, (chunk_id, text, score) in enumerate(chunks, 1):
-            print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
-            print("-" * 40)
-            print(text)
+            # Print chunks
+            print(f"\nRetrieved {len(chunks)} relevant chunks:")
+            for i, (chunk_id, text, score) in enumerate(chunks, 1):
+                print(f"\n{i}. Chunk {chunk_id} (score: {score:.3f}):")
+                print("-" * 40)
+                print(text)
     
     print("\n" + "="*80)
 
