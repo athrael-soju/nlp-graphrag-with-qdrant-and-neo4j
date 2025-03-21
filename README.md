@@ -199,11 +199,14 @@ graphrag process file1.txt file2.txt file3.txt
 # Run a single query
 graphrag query "What type of business is Hugging Face?"
 
-# Use context-aware retrieval
+# Enable context-aware retrieval (if WITH_CONTEXT=False in .env)
 graphrag query "What type of business is Hugging Face?" --with-context
 
+# Disable context-aware retrieval (if WITH_CONTEXT=True in .env)
+graphrag query "What type of business is Hugging Face?" --no-context
+
 # Customize context window size
-graphrag query "What type of business is Hugging Face?" --with-context --context-size 3
+graphrag query "What type of business is Hugging Face?" --context-size 3
 
 # Start interactive session
 graphrag interactive
@@ -246,7 +249,9 @@ You can modify these settings to customize the behavior of GraphRAG without chan
 
 ### Context Settings
 
-- `WITH_CONTEXT`: When set to `True`, enables context-aware retrieval by default (can be overridden with `--no-context` flag)
+- `WITH_CONTEXT`: Controls whether context-aware retrieval is enabled by default
+  - When `True`: Context-aware retrieval is enabled by default, and a `--no-context` flag is available to disable it
+  - When `False`: Standard retrieval is used by default, and a `--with-context` flag is available to enable context-aware retrieval
 - `CONTEXT_SIZE`: Number of chunks to include before and after each matching chunk (default: 2)
 
 Context-aware retrieval leverages the document structure by returning not just the matching chunks, but also the surrounding chunks (previous and next) to provide better context for the LLM.
@@ -273,14 +278,17 @@ Example log output:
 
 ### Context-Aware Retrieval
 
-GraphRAG's context-aware retrieval enhances traditional RAG by maintaining the flow of information from the source documents:
+GraphRAG's context-aware retrieval enhances traditional RAG by maintaining the flow of information from the source documents. The behavior depends on your environment settings in `.env`:
 
 ```bash
-# Enable context-aware retrieval
+# If WITH_CONTEXT=False in .env, use this to enable context:
 graphrag query "Who is Hitomi Kanzaki?" --with-context
 
+# If WITH_CONTEXT=True in .env, context is enabled by default:
+graphrag query "Who is Hitomi Kanzaki?"
+
 # Increase context window size (chunks before/after matches)
-graphrag query "Who is Hitomi Kanzaki?" --with-context --context-size 5
+graphrag query "Who is Hitomi Kanzaki?" --context-size 5
 ```
 
 In the output, matches are marked with 🔍 MATCH and context chunks with 📄 CONTEXT.
