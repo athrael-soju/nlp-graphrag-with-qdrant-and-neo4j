@@ -30,10 +30,12 @@ setup(
         "pyspark",  # Optional: for Spark NLP
         "spark-nlp",  # Optional: for Spark NLP 
         "qdrant-client",
+        "python-dotenv",  # For loading environment variables
+        "loguru",  # For enhanced logging capabilities
     ],
     entry_points={
         "console_scripts": [
-            "graphrag=graphrag.main:main",
+            "graphrag=graphrag.cli.main:main",
         ],
     },
 ) 

@@ -3,7 +3,6 @@ Document ingestion and processing utilities for GraphRAG
 """
 
 import os
-import logging
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 import nltk
@@ -13,21 +12,16 @@ try:
 except ImportError:
     fitz = None
 
-from sentence_transformers import SentenceTransformer
-from graphrag.neo4j_connection import get_connection as get_neo4j_connection
-from graphrag.qdrant_connection import get_connection as get_qdrant_connection
-
-# Initialize logger
-logger = logging.getLogger(__name__)
+from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
+from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
+from graphrag.utils.logger import logger
 
 # Download NLTK resources
 try:
     nltk.download('punkt', quiet=True)
 except Exception as e:
     logger.warning(f"Failed to download NLTK resources: {str(e)}")
-
-# Default embedding model
-DEFAULT_EMBEDDING_MODEL = 'intfloat/e5-base-v2'
 
 class DocumentIngestor:
     """Handles document loading, processing, and storage in Neo4j and Qdrant"""
@@ -42,9 +36,8 @@ class DocumentIngestor:
         """
         self.neo4j = neo4j_conn or get_neo4j_connection()
         self.qdrant = qdrant_conn or get_qdrant_connection()
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedding_model = SentenceTransformer(embedding_model)
-        logger.info("Embedding model loaded successfully")
+        self.embedding_model = embedding_model
+        logger.info(f"Using embedding model: {embedding_model}")
         
     def load_pdf(self, path: str) -> str:
         """Load text from a PDF file
@@ -126,11 +119,8 @@ class DocumentIngestor:
             
         logger.info(f"Generating embeddings for {len(chunks)} chunks")
         try:
-            # Add "passage: " prefix to each chunk as required by E5 model
-            prefixed_chunks = [f"passage: {ch}" for ch in chunks]
-            embeddings = self.embedding_model.encode(prefixed_chunks, 
-                                               normalize_embeddings=True,
-                                               show_progress_bar=len(chunks) > 10)
+            # Use shared embedding utility with E5 passage prefix
+            embeddings = embed_text(chunks, model_name=self.embedding_model, normalize=True)
             logger.info(f"Successfully generated embeddings of shape {embeddings.shape}")
             return embeddings
         except Exception as e:
@@ -154,6 +144,7 @@ class DocumentIngestor:
         self.neo4j.run_query(doc_query, {"doc_id": doc_id})
         
         # Create chunk nodes and connect to document
+        prev_chunk_id = None
         for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
             chunk_id = f"{doc_id}_chunk{i}"
             chunk_query = """
@@ -172,7 +163,24 @@ class DocumentIngestor:
             }
             self.neo4j.run_query(chunk_query, params)
             
-        logger.info(f"Stored {len(chunks)} chunks for document {doc_id} in Neo4j")
+            # Create NEXT/PREV relationships between consecutive chunks
+            if prev_chunk_id is not None:
+                relationship_query = """
+                MATCH (prev:Chunk {id: $prev_chunk_id})
+                WITH prev
+                MATCH (curr:Chunk {id: $curr_chunk_id})
+                MERGE (prev)-[:NEXT]->(curr)
+                MERGE (curr)-[:PREV]->(prev)
+                """
+                relationship_params = {
+                    "prev_chunk_id": prev_chunk_id,
+                    "curr_chunk_id": chunk_id
+                }
+                self.neo4j.run_query(relationship_query, relationship_params)
+                
+            prev_chunk_id = chunk_id
+            
+        logger.info(f"Stored {len(chunks)} chunks for document {doc_id} in Neo4j with NEXT/PREV relationships")
         
     def store_embeddings_in_qdrant(self, doc_id: str, chunks: List[str], 
                                 embeddings: np.ndarray) -> None:
@@ -278,10 +286,6 @@ def process_document(doc_id: str, text: str = None, pdf_path: str = None,
     return ingestor.process_document(doc_id, text, pdf_path, max_tokens)
     
 if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
     # Demo with example text
     example_text = """
     Hugging Face, Inc. is an American company that develops tools for building applications using machine learning.

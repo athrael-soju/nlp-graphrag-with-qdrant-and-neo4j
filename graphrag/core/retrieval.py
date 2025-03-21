@@ -3,19 +3,13 @@ Retrieval utilities for GraphRAG
 """
 
 import re
-import logging
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
-from sentence_transformers import SentenceTransformer
-from graphrag.neo4j_connection import get_connection as get_neo4j_connection
-from graphrag.qdrant_connection import get_connection as get_qdrant_connection
-
-# Initialize logger
-logger = logging.getLogger(__name__)
-
-# Default embedding model
-DEFAULT_EMBEDDING_MODEL = 'intfloat/e5-base-v2'
+from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
+from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
+from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
+from graphrag.utils.logger import logger
 
 class Retriever:
     """Base class for retrieval in GraphRAG"""
@@ -79,9 +73,8 @@ class VectorRetriever(Retriever):
             embedding_model: Name or path of the embedding model
         """
         super().__init__(neo4j_conn, qdrant_conn)
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedding_model = SentenceTransformer(embedding_model)
-        logger.info("Embedding model loaded successfully")
+        self.embedding_model = embedding_model
+        logger.info(f"Using embedding model: {embedding_model}")
         
     def embed_query(self, query: str) -> np.ndarray:
         """Embed a query
@@ -96,21 +89,19 @@ class VectorRetriever(Retriever):
         logger.info(f"Embedding query: {query}")
         
         try:
-            # E5 models expect "query: " prefix
-            # Check if model name contains 'e5'
-            model_name = str(self.embedding_model).lower()
-            if 'e5' in model_name:
-                query = f"query: {query}"
-                logger.info(f"Using E5 prefix: {query}")
-            
-            # Encode the query and normalize
-            query_embedding = self.embedding_model.encode([query], normalize_embeddings=True)[0]
+            # Use shared embedding utility with query prefix
+            query_embedding = embed_text(query, model_name=self.embedding_model, prefix="query:", normalize=True)
             logger.info(f"Query embedding shape: {query_embedding.shape}")
             return query_embedding
         except Exception as e:
             logger.error(f"Error embedding query: {str(e)}")
+            # Find dimension of the model's embeddings
+            try:
+                from sentence_transformers import SentenceTransformer
+                dim = SentenceTransformer(self.embedding_model).get_sentence_embedding_dimension()
+            except:
+                dim = 768  # Default fallback
             # Return a zero vector as fallback
-            dim = self.embedding_model.get_sentence_embedding_dimension()
             return np.zeros(dim)
     
     def retrieve_chunks(self, query: str, top_k: int = 5) -> List[Tuple[str, str, float]]:
@@ -283,25 +274,21 @@ class GraphRetriever(Retriever):
         """
         logger.info(f"Relationship search for entity: {entity_name}, relation: {relation_keyword}")
         
-        # Prepare relation pattern for filtering
-        rel_pattern = f".*{relation_keyword}.*" if relation_keyword else None
-        
         # Query Neo4j for relationships
-        if rel_pattern:
+        if relation_keyword:
             result = self.neo4j.run_query(
                 """
-                MATCH (s:Entity)-[r]->(o:Entity)
-                WHERE s.name = $name AND type(r) =~ $rel
-                RETURN s.name AS subject, type(r) AS relation, o.name AS object, r.source AS chunk_id
+                MATCH (s:Entity {name: $name})-[r:RELATES_TO]->(o:Entity)
+                WHERE r.name =~ $rel
+                RETURN s.name AS subject, r.name AS relation, o.name AS object, r.source AS chunk_id
                 """,
-                {"name": entity_name, "rel": rel_pattern}
+                {"name": entity_name, "rel": f"(?i).*{relation_keyword}.*"}
             )
         else:
             result = self.neo4j.run_query(
                 """
-                MATCH (s:Entity)-[r]->(o:Entity)
-                WHERE s.name = $name
-                RETURN s.name AS subject, type(r) AS relation, o.name AS object, r.source AS chunk_id
+                MATCH (s:Entity {name: $name})-[r:RELATES_TO]->(o:Entity)
+                RETURN s.name AS subject, r.name AS relation, o.name AS object, r.source AS chunk_id
                 """,
                 {"name": entity_name}
             )
@@ -383,6 +370,149 @@ class GraphRetriever(Retriever):
         logger.info(f"Retrieved {len(results)} chunks via graph-based methods")
         return results
 
+    def get_next_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Get the next chunk in a document chain using NEXT relationship
+        
+        Args:
+            chunk_id: Current chunk identifier
+            
+        Returns:
+            Optional[Dict[str, Any]]: Next chunk information or None if no next chunk exists
+        """
+        logger.info(f"Getting next chunk for: {chunk_id}")
+        
+        result = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})-[:NEXT]->(next:Chunk)
+            RETURN next.id AS id, next.text AS text, next.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if result and len(result) > 0:
+            return result[0]
+        return None
+        
+    def get_prev_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Get the previous chunk in a document chain using PREV relationship
+        
+        Args:
+            chunk_id: Current chunk identifier
+            
+        Returns:
+            Optional[Dict[str, Any]]: Previous chunk information or None if no previous chunk exists
+        """
+        logger.info(f"Getting previous chunk for: {chunk_id}")
+        
+        result = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})-[:PREV]->(prev:Chunk)
+            RETURN prev.id AS id, prev.text AS text, prev.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if result and len(result) > 0:
+            return result[0]
+        return None
+        
+    def get_document_chain(self, chunk_id: str, max_chunks: int = 5) -> List[Dict[str, Any]]:
+        """Get a sequence of chunks in both directions around the specified chunk
+        
+        Args:
+            chunk_id: Center chunk identifier
+            max_chunks: Maximum number of chunks to retrieve in each direction
+            
+        Returns:
+            List[Dict[str, Any]]: List of chunks in sequence order
+        """
+        logger.info(f"Getting document chain centered on: {chunk_id}, max_chunks: {max_chunks}")
+        
+        # Get current chunk
+        current = self.neo4j.run_query(
+            """
+            MATCH (c:Chunk {id: $chunk_id})
+            RETURN c.id AS id, c.text AS text, c.index AS index
+            """,
+            {"chunk_id": chunk_id}
+        )
+        
+        if not current:
+            logger.warning(f"Chunk {chunk_id} not found")
+            return []
+            
+        current_chunk = current[0]
+        result = [current_chunk]
+        
+        # Get previous chunks
+        prev_id = chunk_id
+        for _ in range(max_chunks):
+            prev_chunk = self.get_prev_chunk(prev_id)
+            if prev_chunk:
+                result.insert(0, prev_chunk)  # Insert at beginning to maintain order
+                prev_id = prev_chunk["id"]
+            else:
+                break
+                
+        # Get next chunks
+        next_id = chunk_id
+        for _ in range(max_chunks):
+            next_chunk = self.get_next_chunk(next_id)
+            if next_chunk:
+                result.append(next_chunk)  # Append at end to maintain order
+                next_id = next_chunk["id"]
+            else:
+                break
+                
+        return result
+
+    def retrieve_with_context(self, query: str, top_k: int = 10, context_size: int = 2) -> List[Dict[str, Any]]:
+        """Retrieve chunks relevant to a query with surrounding context chunks
+        
+        Args:
+            query: User query
+            top_k: Number of top chunks to retrieve
+            context_size: Number of chunks to include before and after each matched chunk
+            
+        Returns:
+            List[Dict[str, Any]]: List of chunks with context
+        """
+        logger.info(f"Retrieving with context: query='{query}', top_k={top_k}, context_size={context_size}")
+        
+        # First perform standard vector search
+        base_results = self.retrieve_chunks(query, top_k)
+        
+        # Create a set to track unique chunk IDs
+        seen_chunks = set()
+        
+        # For each result, get the document chain
+        contextualized_results = []
+        
+        for result in base_results:
+            # Extract data from the tuple (chunk_id, chunk_text, score)
+            chunk_id, chunk_text, score = result
+            
+            if chunk_id in seen_chunks:
+                continue
+                
+            # Get context chunks
+            chain = self.get_document_chain(chunk_id, context_size)
+            
+            # Add a flag to indicate which chunk was the direct match
+            for chunk in chain:
+                chunk_in_list = chunk.copy()  # Create a copy to avoid modifying the original
+                chunk_in_list["is_match"] = (chunk["id"] == chunk_id)
+                chunk_in_list["score"] = score if chunk["id"] == chunk_id else 0.0
+                
+                if chunk["id"] not in seen_chunks:
+                    contextualized_results.append(chunk_in_list)
+                    seen_chunks.add(chunk["id"])
+        
+        # Sort by original vector search score (matched chunks will be at the top)
+        contextualized_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        return contextualized_results
+
 
 class HybridRetriever(Retriever):
     """Hybrid retrieval combining vector and graph-based approaches"""
@@ -412,9 +542,9 @@ class HybridRetriever(Retriever):
         Returns:
             List[Tuple[str, str, float]]: List of (chunk_id, chunk_text, score) tuples
         """
-        # Get results from both retrievers
-        vector_results = self.vector_retriever.retrieve_chunks(query, top_k=top_k*2)
-        graph_results = self.graph_retriever.retrieve_chunks(query, top_k=top_k*2)
+        # Get results from both retrievers - use exactly top_k to respect user settings
+        vector_results = self.vector_retriever.retrieve_chunks(query, top_k=top_k)
+        graph_results = self.graph_retriever.retrieve_chunks(query, top_k=top_k)
         
         # Normalize scores separately
         def normalize_scores(results):
@@ -423,8 +553,8 @@ class HybridRetriever(Retriever):
             
             # Extract scores
             scores = [score for _, _, score in results]
-            min_score = min(scores)
-            max_score = max(scores)
+            min_score = min(scores) if scores else 0
+            max_score = max(scores) if scores else 1
             
             # Avoid division by zero
             if max_score == min_score:
@@ -496,7 +626,10 @@ class HybridRetriever(Retriever):
         for entity in entity_candidates:
             relation_keyword = ""  # Get all relations
             triplets = self.graph_retriever.relationship_search(entity, relation_keyword)
-            triplet_results.extend(triplets)
+            triplet_results.extend(triplets[:top_k])  # Limit triplets to top_k per entity
+            
+        # Ensure we don't return more than top_k triplets total
+        triplet_results = triplet_results[:top_k]
             
         return {
             "chunks": chunk_results,
@@ -530,11 +663,58 @@ def hybrid_retrieve_with_triplets(query: str, top_k: int = 5) -> Dict[str, Any]:
     retriever = HybridRetriever()
     return retriever.retrieve_with_triplets(query, top_k)
 
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+def get_next_chunk(chunk_id: str) -> Optional[Dict[str, Any]]:
+    """Get the next chunk in a document chain using NEXT relationship (standalone function)
     
+    Args:
+        chunk_id: Current chunk identifier
+        
+    Returns:
+        Optional[Dict[str, Any]]: Next chunk information or None if no next chunk exists
+    """
+    retriever = GraphRetriever()
+    return retriever.get_next_chunk(chunk_id)
+    
+def get_prev_chunk(chunk_id: str) -> Optional[Dict[str, Any]]:
+    """Get the previous chunk in a document chain using PREV relationship (standalone function)
+    
+    Args:
+        chunk_id: Current chunk identifier
+        
+    Returns:
+        Optional[Dict[str, Any]]: Previous chunk information or None if no previous chunk exists
+    """
+    retriever = GraphRetriever()
+    return retriever.get_prev_chunk(chunk_id)
+    
+def get_document_chain(chunk_id: str, max_chunks: int = 5) -> List[Dict[str, Any]]:
+    """Get a sequence of chunks in both directions around the specified chunk (standalone function)
+    
+    Args:
+        chunk_id: Center chunk identifier
+        max_chunks: Maximum number of chunks to retrieve in each direction
+        
+    Returns:
+        List[Dict[str, Any]]: List of chunks in sequence order
+    """
+    retriever = GraphRetriever()
+    return retriever.get_document_chain(chunk_id, max_chunks)
+
+def retrieve_with_context(query: str, top_k: int = 10, context_size: int = 2) -> List[Dict[str, Any]]:
+    """Retrieve chunks relevant to a query with surrounding context chunks (standalone function)
+    
+    Args:
+        query: User query
+        top_k: Number of top chunks to retrieve
+        context_size: Number of chunks to include before and after each matched chunk
+        
+    Returns:
+        List[Dict[str, Any]]: List of chunks with context
+    """
+    retriever = GraphRetriever()
+    return retriever.retrieve_with_context(query, top_k, context_size)
+
+if __name__ == "__main__":
     # Demo with example query
     example_query = "What type of business is Hugging Face?"
     
