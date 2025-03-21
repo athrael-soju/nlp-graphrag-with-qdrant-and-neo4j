@@ -31,6 +31,7 @@ setup(
         "spark-nlp",  # Optional: for Spark NLP 
         "qdrant-client",
         "python-dotenv",  # For loading environment variables
+        "loguru",  # For enhanced logging capabilities
     ],
     entry_points={
         "console_scripts": [

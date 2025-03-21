@@ -3,14 +3,12 @@ Neo4j database connection utilities for GraphRAG
 """
 
 from neo4j import GraphDatabase
-import logging
 import os
 from dotenv import load_dotenv
+from graphrag.utils.logger import logger
 
 # Load environment variables
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 class Neo4jConnection:
     """Manages connection to Neo4j database for GraphRAG"""
@@ -181,8 +179,6 @@ def get_connection(uri=None, auth=None):
 
 
 if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
     # Test connection
     conn = get_connection()
     if conn.test_connection():

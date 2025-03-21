@@ -2,7 +2,6 @@
 Shared utilities for GraphRAG
 """
 
-import logging
 import numpy as np
 import os
 from typing import List, Union
@@ -11,8 +10,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Initialize logger
-logger = logging.getLogger(__name__)
+# Import Loguru logger
+from graphrag.utils.logger import logger
 
 # Default embedding model from environment variables
 DEFAULT_EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'intfloat/e5-base-v2')

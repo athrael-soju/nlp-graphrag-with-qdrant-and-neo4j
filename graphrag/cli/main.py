@@ -4,9 +4,11 @@ Main entry point for GraphRAG system
 
 import os
 import sys
-import logging
 import argparse
 from typing import List, Dict, Any, Optional, Union
+
+# Import Loguru logger
+from graphrag.utils.logger import logger
 
 from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
 from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
@@ -15,11 +17,6 @@ from graphrag.core.nlp_graph import process_chunk
 from graphrag.core.triplets import process_chunk as process_chunk_triplets
 from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets, retrieve_with_context
 from graphrag.utils.config import get_process_config, reload_env
-
-# Setup logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 def setup_database():
     """Initialize Neo4j database with necessary indexes and Qdrant collections"""

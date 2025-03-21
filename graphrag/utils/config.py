@@ -3,12 +3,11 @@ Configuration utilities for GraphRAG
 """
 
 import os
-import logging
 from typing import Any, Dict, Optional
 from dotenv import load_dotenv, find_dotenv
 
-# Initialize logger
-logger = logging.getLogger(__name__)
+# Use Loguru logger instead of standard logging
+from graphrag.utils.logger import logger
 
 def reload_env():
     """

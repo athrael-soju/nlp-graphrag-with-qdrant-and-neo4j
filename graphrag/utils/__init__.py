@@ -10,3 +10,4 @@ from graphrag.utils.config import (
     get_model_config, 
     get_process_config
 )
+from graphrag.utils.logger import logger

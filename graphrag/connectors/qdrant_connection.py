@@ -4,16 +4,14 @@ Qdrant vector database connection utilities for GraphRAG
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-import logging
 import os
 import uuid
 import hashlib
 from dotenv import load_dotenv
+from graphrag.utils.logger import logger
 
 # Load environment variables
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 class QdrantConnection:
     """Manages connection to Qdrant for vector search in GraphRAG"""
@@ -277,8 +275,6 @@ def get_connection(url=None, api_key=None):
 
 
 if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
     # Test connection
     conn = get_connection()
     if conn.test_connection():

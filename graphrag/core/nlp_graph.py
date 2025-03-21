@@ -2,14 +2,11 @@
 NLP graph creation utilities for GraphRAG
 """
 
-import logging
 import nltk
 from typing import List, Tuple, Optional
 from itertools import chain
 from graphrag.connectors.neo4j_connection import get_connection
-
-# Initialize logger
-logger = logging.getLogger(__name__)
+from graphrag.utils.logger import logger
 
 # Download NLTK resources if not already downloaded
 try:
@@ -287,10 +284,6 @@ def process_chunks_with_spark(chunks: List[Tuple[str, str]]) -> List[Tuple[str, 
     return builder.process_chunks(chunks)
     
 if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
     # Demo with example text
     example_text = """
     Hugging Face, Inc. is an American company that develops tools for building applications using machine learning.

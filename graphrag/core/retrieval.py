@@ -3,16 +3,13 @@ Retrieval utilities for GraphRAG
 """
 
 import re
-import logging
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
 from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
 from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
 from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
-
-# Initialize logger
-logger = logging.getLogger(__name__)
+from graphrag.utils.logger import logger
 
 class Retriever:
     """Base class for retrieval in GraphRAG"""
@@ -718,10 +715,6 @@ def retrieve_with_context(query: str, top_k: int = 10, context_size: int = 2) ->
     return retriever.retrieve_with_context(query, top_k, context_size)
 
 if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
     # Demo with example query
     example_query = "What type of business is Hugging Face?"
     

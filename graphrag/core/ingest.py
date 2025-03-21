@@ -3,7 +3,6 @@ Document ingestion and processing utilities for GraphRAG
 """
 
 import os
-import logging
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 import nltk
@@ -16,9 +15,7 @@ except ImportError:
 from graphrag.connectors.neo4j_connection import get_connection as get_neo4j_connection
 from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_connection
 from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
-
-# Initialize logger
-logger = logging.getLogger(__name__)
+from graphrag.utils.logger import logger
 
 # Download NLTK resources
 try:
@@ -289,10 +286,6 @@ def process_document(doc_id: str, text: str = None, pdf_path: str = None,
     return ingestor.process_document(doc_id, text, pdf_path, max_tokens)
     
 if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
     # Demo with example text
     example_text = """
     Hugging Face, Inc. is an American company that develops tools for building applications using machine learning.

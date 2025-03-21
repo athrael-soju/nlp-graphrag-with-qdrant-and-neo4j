@@ -238,7 +238,8 @@ WITH_CONTEXT=True
 CONTEXT_SIZE=2
 
 # Logging Settings
-GRAPHRAG_VERBOSITY=1
+LOG_LEVEL=INFO
+LOG_FILE=logs/graphrag.log
 ```
 
 You can modify these settings to customize the behavior of GraphRAG without changing the code.
@@ -249,6 +250,24 @@ You can modify these settings to customize the behavior of GraphRAG without chan
 - `CONTEXT_SIZE`: Number of chunks to include before and after each matching chunk (default: 2)
 
 Context-aware retrieval leverages the document structure by returning not just the matching chunks, but also the surrounding chunks (previous and next) to provide better context for the LLM.
+
+### Logging System
+
+GraphRAG uses Loguru for enhanced, structured logging:
+
+- `LOG_LEVEL`: Set the minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- `LOG_FILE`: If specified, logs will be written to this file with automatic rotation (10MB size, 1 week retention)
+
+Loguru provides several benefits over standard logging:
+- Colorized output for better readability
+- Structured format with timestamps and source information
+- Automatic log rotation and compression
+- Intercepts and formats logs from third-party libraries
+
+Example log output:
+```
+2023-07-21 15:30:45.123 | INFO     | graphrag.core.ingest:process_document:122 - Processing document example_doc...
+```
 
 ## Advanced Usage
 
