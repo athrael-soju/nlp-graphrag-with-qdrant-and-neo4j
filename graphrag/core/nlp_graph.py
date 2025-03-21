@@ -23,11 +23,7 @@ try:
     from nltk.corpus import stopwords
     STOPWORDS = set(stopwords.words('english'))
 except Exception:
-    # Fallback basic stopwords if NLTK stopwords not available
-    STOPWORDS = {'a', 'an', 'the', 'and', 'or', 'but', 'if', 'because', 'as', 'what',
-                'which', 'this', 'that', 'these', 'those', 'then', 'just', 'so', 'than',
-                'such', 'both', 'through', 'about', 'for', 'is', 'of', 'while', 'during',
-                'to', 'from', 'in', 'on', 'at', 'by', 'with'}
+    logger.warning("Failed to load NLTK stopwords: {str(e)}")
 
 class NLPGraphBuilder:
     """Builds NLP-enhanced knowledge graph from text chunks"""
