@@ -26,7 +26,7 @@ except Exception as e:
     logger.warning(f"Failed to download NLTK resources: {str(e)}")
 
 # Default model for triplet extraction from environment variables
-DEFAULT_TRIPLET_MODEL = os.getenv('TRIPLET_MODEL', 'bew/t5_sentence_to_triplet_xl')
+DEFAULT_TRIPLET_MODEL = os.getenv("TRIPLET_MODEL", "bew/t5_sentence_to_triplet_xl")
 
 
 class TripletExtractor:
@@ -42,7 +42,7 @@ class TripletExtractor:
         """
         # Use environment variable if not provided
         model_name = model_name or DEFAULT_TRIPLET_MODEL
-        
+
         if AutoTokenizer is None or AutoModelForSeq2SeqLM is None:
             raise ImportError(
                 "Transformers library is required for triplet extraction. "
@@ -61,40 +61,6 @@ class TripletExtractor:
             )
 
         self.neo4j = neo4j_conn or get_connection()
-
-        # Check if Neo4j supports vector search
-        try:
-            version_info = self.neo4j.run_query(
-                "CALL dbms.components() YIELD name, versions, edition RETURN name, versions, edition"
-            )
-            neo4j_version = None
-            neo4j_edition = None
-
-            for item in version_info:
-                if item.get("name") == "Neo4j Kernel":
-                    neo4j_version = item.get("versions", [""])[0]
-                    neo4j_edition = item.get("edition", "")
-
-            logger.info(
-                f"Detected Neo4j version {neo4j_version}, edition {neo4j_edition}"
-            )
-
-            # Vector indexes require Neo4j 5.11+ Enterprise Edition
-            self.supports_vector = False
-            if neo4j_edition == "enterprise" and neo4j_version:
-                major, minor = map(int, neo4j_version.split(".")[:2])
-                if major > 5 or (major == 5 and minor >= 11):
-                    self.supports_vector = True
-
-            if not self.supports_vector:
-                logger.warning(
-                    "Vector search not supported in this Neo4j version/edition. Will use text-based fallback."
-                )
-        except Exception as e:
-            logger.warning(
-                f"Could not determine Neo4j version/vector support: {str(e)}"
-            )
-            self.supports_vector = False
 
         # Load the tokenizer and model with robust error handling
         logger.info(f"Loading triplet extraction model: {model_name}")
