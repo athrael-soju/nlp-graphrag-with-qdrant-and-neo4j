@@ -172,6 +172,8 @@ source venv/bin/activate # On Windows: venv\Scripts\activate
 pip install -e .
 ```
 
+> **Note:** Required NLTK resources (punkt tokenizer and stopwords) are automatically downloaded during package installation. No manual setup for NLTK is needed.
+
 ## Quick Start
 
 1. First, set up the Neo4j database with required indexes:

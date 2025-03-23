@@ -16,11 +16,7 @@ except ImportError:
     AutoTokenizer = None
     AutoModelForSeq2SeqLM = None
 
-# Download NLTK resources
-try:
-    nltk.download("punkt", quiet=True)
-except Exception as e:
-    logger.warning(f"Failed to download NLTK resources: {str(e)}")
+# No need to download NLTK resources here as it's handled in __init__.py
 
 # Default model for triplet extraction from environment variables
 DEFAULT_TRIPLET_MODEL = os.getenv("TRIPLET_MODEL", "bew/t5_sentence_to_triplet_xl")
