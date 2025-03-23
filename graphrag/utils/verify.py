@@ -1,41 +1,17 @@
-#!/usr/bin/env python
 """
-Verification script for GraphRAG setup
-This script checks that all dependencies are correctly installed and NLTK resources are available
+GraphRAG setup verification utilities
 
-PURPOSE:
-    This script verifies that all components required for GraphRAG are properly installed 
-    and configured. It performs comprehensive checks on the environment to ensure that 
-    GraphRAG can run successfully.
-
-USAGE:
-    # Basic verification (dependencies, NLTK resources, GraphRAG import)
-    python verify_setup.py
-    
-    # Complete verification including database setup checks
-    python verify_setup.py --check-indexes
-
-WHAT THIS SCRIPT CHECKS:
-    1. Required Python dependencies
-    2. NLTK resources (both punkt and punkt_tab tokenizers)
-    3. GraphRAG package initialization
-    4. Database connections to Neo4j and Qdrant
-    5. Neo4j database functionality (with --check-indexes flag)
-
-REQUIREMENTS:
-    - Python 3.6+
-    - GraphRAG package installed
-    - Access to Neo4j and Qdrant databases (for full verification)
-
-AUTHOR:
-    GraphRAG Team
+This module provides functions to verify the GraphRAG setup, including:
+- Dependency checking
+- NLTK resources verification
+- Database connectivity testing
+- Neo4j index verification
 """
 
 import sys
 import importlib
-import subprocess
-import argparse
 import time
+from graphrag.utils.logger import logger
 
 def verify_dependencies():
     """Check if all required dependencies are installed"""
@@ -261,55 +237,4 @@ def verify_neo4j_indexes():
         
     except Exception as e:
         print(f"❌ Failed to verify Neo4j setup: {str(e)}")
-        return False
-
-def main():
-    """Main verification function"""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Verify GraphRAG setup")
-    parser.add_argument('--check-indexes', action='store_true', 
-                        help='Check Neo4j indexes (requires database setup)')
-    args = parser.parse_args()
-    
-    print("=" * 80)
-    print("GRAPHRAG SETUP VERIFICATION")
-    print("=" * 80)
-    
-    dep_ok = verify_dependencies()
-    nltk_ok = verify_nltk_resources()
-    graphrag_ok = verify_graphrag_import()
-    db_ok = verify_database_connections()
-    
-    # Only check indexes if requested
-    if args.check_indexes:
-        indexes_ok = verify_neo4j_indexes()
-    else:
-        indexes_ok = True
-    
-    print("\n" + "=" * 80)
-    print("VERIFICATION SUMMARY")
-    print("=" * 80)
-    print(f"Dependencies: {'✅ OK' if dep_ok else '❌ ISSUES FOUND'}")
-    print(f"NLTK Resources: {'✅ OK' if nltk_ok else '❌ ISSUES FOUND'}")
-    print(f"GraphRAG Import: {'✅ OK' if graphrag_ok else '❌ ISSUES FOUND'}")
-    print(f"Database Connections: {'✅ OK' if db_ok else '❌ ISSUES FOUND'}")
-    
-    if args.check_indexes:
-        print(f"Neo4j Indexes: {'✅ OK' if indexes_ok else '❌ ISSUES FOUND'}")
-    
-    basic_ok = dep_ok and nltk_ok and graphrag_ok and db_ok
-    all_ok = basic_ok and indexes_ok
-    
-    if all_ok:
-        print("\n✅ GraphRAG setup is COMPLETE and WORKING")
-        return 0
-    elif basic_ok and not indexes_ok and args.check_indexes:
-        print("\n⚠ GraphRAG basic setup is OK, but database setup is incomplete")
-        print("   Run 'graphrag setup' to complete the setup")
-        return 1
-    else:
-        print("\n⚠ GraphRAG setup has ISSUES that need to be addressed")
-        return 1
-
-if __name__ == "__main__":
-    sys.exit(main()) 
+        return False 

@@ -11,3 +11,10 @@ from graphrag.utils.config import (
     get_process_config
 )
 from graphrag.utils.logger import logger
+from graphrag.utils.verify import (
+    verify_dependencies,
+    verify_nltk_resources,
+    verify_graphrag_import,
+    verify_database_connections,
+    verify_neo4j_indexes
+)

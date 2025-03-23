@@ -18,6 +18,55 @@ from graphrag.core.triplets import process_chunk as process_chunk_triplets
 from graphrag.core.retrieval import hybrid_retrieve, hybrid_retrieve_with_triplets, retrieve_with_context
 from graphrag.utils.config import get_process_config, reload_env
 
+# Import verification functions
+from graphrag.utils.verify import (
+    verify_dependencies, 
+    verify_nltk_resources, 
+    verify_graphrag_import, 
+    verify_database_connections, 
+    verify_neo4j_indexes
+)
+
+def verify_setup(check_indexes=False):
+    """Verify the GraphRAG setup
+    
+    Args:
+        check_indexes: Whether to check Neo4j indexes
+    
+    Returns:
+        bool: Whether the verification succeeded
+    """
+    logger.info("Starting GraphRAG setup verification...")
+    
+    # Verify dependencies
+    dependencies_ok = verify_dependencies()
+    
+    # Verify NLTK resources
+    nltk_ok = verify_nltk_resources()
+    
+    # Verify GraphRAG import
+    graphrag_ok = verify_graphrag_import()
+    
+    # Verify database connections
+    connections_ok = verify_database_connections()
+    
+    # Verify Neo4j indexes if requested
+    indexes_ok = True
+    if check_indexes:
+        indexes_ok = verify_neo4j_indexes()
+    
+    # Overall result
+    success = dependencies_ok and nltk_ok and graphrag_ok and connections_ok and indexes_ok
+    
+    if success:
+        logger.info("GraphRAG setup verification completed successfully.")
+        print("\n✅ GraphRAG setup verification completed successfully.")
+    else:
+        logger.error("GraphRAG setup verification completed with issues.")
+        print("\n❌ GraphRAG setup verification completed with issues.")
+    
+    return success
+
 def setup_database():
     """Initialize Neo4j database with necessary indexes and Qdrant collections"""
     # Reload environment variables
@@ -356,6 +405,11 @@ def parse_args():
     # Interactive command
     interactive_parser = subparsers.add_parser("interactive", help="Run interactive query session")
     
+    # Add verify command
+    verify_parser = subparsers.add_parser("verify", help="Verify GraphRAG setup and configuration")
+    verify_parser.add_argument("--check-indexes", action="store_true", 
+                             help="Also verify Neo4j database indexes and basic operations")
+    
     return parser.parse_args()
     
 def run_interactive_session():
@@ -488,6 +542,11 @@ def main():
             
         elif args.command == "interactive":
             run_interactive_session()
+            
+        elif args.command == "verify":
+            check_indexes = args.check_indexes if hasattr(args, "check_indexes") else False
+            success = verify_setup(check_indexes=check_indexes)
+            return 0 if success else 1
             
         else:
             print("Please specify a command. Use --help for available commands.")
