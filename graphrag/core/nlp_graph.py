@@ -8,19 +8,15 @@ from itertools import chain
 from graphrag.connectors.neo4j_connection import get_connection
 from graphrag.utils.logger import logger
 
-# Download NLTK resources if not already downloaded
-try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-except Exception as e:
-    logger.warning(f"Failed to download NLTK resources: {str(e)}")
+# No need to download NLTK resources here as it's handled in __init__.py
 
 # Get stopwords
 try:
     from nltk.corpus import stopwords
     STOPWORDS = set(stopwords.words('english'))
-except Exception:
-    logger.warning("Failed to load NLTK stopwords: {str(e)}")
+except Exception as e:
+    logger.warning(f"Failed to load NLTK stopwords: {str(e)}")
+    STOPWORDS = set()
 
 class NLPGraphBuilder:
     """Builds NLP-enhanced knowledge graph from text chunks"""

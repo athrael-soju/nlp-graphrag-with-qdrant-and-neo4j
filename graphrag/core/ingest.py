@@ -17,11 +17,7 @@ from graphrag.connectors.qdrant_connection import get_connection as get_qdrant_c
 from graphrag.utils.common import embed_text, DEFAULT_EMBEDDING_MODEL
 from graphrag.utils.logger import logger
 
-# Download NLTK resources
-try:
-    nltk.download('punkt', quiet=True)
-except Exception as e:
-    logger.warning(f"Failed to download NLTK resources: {str(e)}")
+# No need to download NLTK resources here as it's handled in __init__.py
 
 class DocumentIngestor:
     """Handles document loading, processing, and storage in Neo4j and Qdrant"""

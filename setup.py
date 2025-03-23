@@ -1,4 +1,47 @@
 from setuptools import setup, find_packages
+import os
+import subprocess
+import sys
+from setuptools.command.develop import develop
+from setuptools.command.install import install
+
+def execute_nltk_download():
+    """Execute the NLTK download script to get required tokenization resources"""
+    try:
+        # Try to download both punkt and punkt_tab to ensure compatibility
+        # with different NLTK versions
+        print("Downloading NLTK resources...")
+        
+        # Try punkt_tab first (newer NLTK versions)
+        try:
+            subprocess.check_call([sys.executable, '-c', 
+                                  'import nltk; nltk.download("punkt_tab", quiet=True)'])
+            print("Successfully downloaded punkt_tab resources.")
+        except:
+            # Fall back to punkt if punkt_tab fails
+            print("punkt_tab not available, falling back to punkt...")
+            subprocess.check_call([sys.executable, '-c', 
+                                  'import nltk; nltk.download("punkt", quiet=True); nltk.download("stopwords", quiet=True)'])
+            print("Successfully downloaded punkt and stopwords resources.")
+            
+    except Exception as e:
+        print(f"NLTK data download failed: {str(e)}")
+        print("You may need to manually download NLTK data by running:")
+        print("  python -m nltk.downloader punkt stopwords")
+        print("  or for newer NLTK versions:")
+        print("  python -m nltk.downloader punkt_tab")
+
+class PostDevelopCommand(develop):
+    """Post-installation for development mode."""
+    def run(self):
+        develop.run(self)
+        execute_nltk_download()
+
+class PostInstallCommand(install):
+    """Post-installation for installation mode."""
+    def run(self):
+        install.run(self)
+        execute_nltk_download()
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -37,5 +80,9 @@ setup(
         "console_scripts": [
             "graphrag=graphrag.cli.main:main",
         ],
+    },
+    cmdclass={
+        'develop': PostDevelopCommand,
+        'install': PostInstallCommand,
     },
 ) 
