@@ -172,7 +172,7 @@ source venv/bin/activate # On Windows: venv\Scripts\activate
 pip install -e .
 ```
 
-> **Note:** Required NLTK resources (punkt tokenizer and stopwords) are automatically downloaded during package installation. No manual setup for NLTK is needed.
+> **Note:** Required NLTK resources (tokenizers and stopwords) are automatically downloaded during package installation. GraphRAG supports both older NLTK versions (using punkt) and newer versions (using punkt_tab).
 
 ## Quick Start
 

@@ -6,15 +6,30 @@ from setuptools.command.develop import develop
 from setuptools.command.install import install
 
 def execute_nltk_download():
-    """Execute the NLTK download script"""
+    """Execute the NLTK download script to get required tokenization resources"""
     try:
-        subprocess.check_call([sys.executable, '-c', 
-                              'import nltk; nltk.download("punkt", quiet=True); nltk.download("stopwords", quiet=True)'])
-        print("NLTK resources downloaded successfully.")
+        # Try to download both punkt and punkt_tab to ensure compatibility
+        # with different NLTK versions
+        print("Downloading NLTK resources...")
+        
+        # Try punkt_tab first (newer NLTK versions)
+        try:
+            subprocess.check_call([sys.executable, '-c', 
+                                  'import nltk; nltk.download("punkt_tab", quiet=True)'])
+            print("Successfully downloaded punkt_tab resources.")
+        except:
+            # Fall back to punkt if punkt_tab fails
+            print("punkt_tab not available, falling back to punkt...")
+            subprocess.check_call([sys.executable, '-c', 
+                                  'import nltk; nltk.download("punkt", quiet=True); nltk.download("stopwords", quiet=True)'])
+            print("Successfully downloaded punkt and stopwords resources.")
+            
     except Exception as e:
         print(f"NLTK data download failed: {str(e)}")
         print("You may need to manually download NLTK data by running:")
         print("  python -m nltk.downloader punkt stopwords")
+        print("  or for newer NLTK versions:")
+        print("  python -m nltk.downloader punkt_tab")
 
 class PostDevelopCommand(develop):
     """Post-installation for development mode."""
