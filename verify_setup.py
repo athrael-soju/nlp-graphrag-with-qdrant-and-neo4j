@@ -2,6 +2,33 @@
 """
 Verification script for GraphRAG setup
 This script checks that all dependencies are correctly installed and NLTK resources are available
+
+PURPOSE:
+    This script verifies that all components required for GraphRAG are properly installed 
+    and configured. It performs comprehensive checks on the environment to ensure that 
+    GraphRAG can run successfully.
+
+USAGE:
+    # Basic verification (dependencies, NLTK resources, GraphRAG import)
+    python verify_setup.py
+    
+    # Complete verification including database setup checks
+    python verify_setup.py --check-indexes
+
+WHAT THIS SCRIPT CHECKS:
+    1. Required Python dependencies
+    2. NLTK resources (both punkt and punkt_tab tokenizers)
+    3. GraphRAG package initialization
+    4. Database connections to Neo4j and Qdrant
+    5. Neo4j database functionality (with --check-indexes flag)
+
+REQUIREMENTS:
+    - Python 3.6+
+    - GraphRAG package installed
+    - Access to Neo4j and Qdrant databases (for full verification)
+
+AUTHOR:
+    GraphRAG Team
 """
 
 import sys

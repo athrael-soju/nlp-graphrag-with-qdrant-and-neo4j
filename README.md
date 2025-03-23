@@ -172,7 +172,28 @@ source venv/bin/activate # On Windows: venv\Scripts\activate
 pip install -e .
 ```
 
-> **Note:** Required NLTK resources (tokenizers and stopwords) are automatically downloaded during package installation. GraphRAG supports both older NLTK versions (using punkt) and newer versions (using punkt_tab).
+> **Note:** Required NLTK resources (tokenizers and stopwords) are automatically downloaded during package installation. GraphRAG supports both older NLTK versions (using `punkt`) and newer versions (using `punkt_tab`).
+
+### Verify Installation
+
+GraphRAG includes a verification script to check that all components are properly installed and configured:
+
+```bash
+# Basic verification (dependencies, NLTK resources, and GraphRAG import)
+python verify_setup.py
+
+# Complete verification including database checks
+python verify_setup.py --check-indexes
+```
+
+The verification script checks:
+- Required Python dependencies
+- NLTK resources (both `punkt` and `punkt_tab` tokenizers)
+- GraphRAG package initialization
+- Database connections to Neo4j and Qdrant
+- Neo4j database functionality (with `--check-indexes` flag)
+
+If any issues are found, the script will provide guidance on how to fix them.
 
 ## Quick Start
 
@@ -248,6 +269,38 @@ LOG_FILE=logs/graphrag.log
 ```
 
 You can modify these settings to customize the behavior of GraphRAG without changing the code.
+
+## NLTK Compatibility and Troubleshooting
+
+GraphRAG relies on NLTK for text processing and tokenization. Due to changes in NLTK's resource management:
+
+### NLTK Tokenizer Resources
+
+- **Newer NLTK versions** (3.6.7+) use the `punkt_tab` tokenizer format
+- **Older NLTK versions** use the `punkt` tokenizer format
+- GraphRAG supports **both formats** automatically
+
+If you encounter tokenization errors:
+
+1. Run the verification script to check your NLTK resource setup:
+   ```bash
+   python verify_setup.py
+   ```
+
+2. If issues are found, GraphRAG will attempt to download the necessary resources during initialization, or you can manually download them:
+   ```python
+   import nltk
+   nltk.download('punkt')       # For older NLTK versions
+   nltk.download('punkt_tab')   # For newer NLTK versions
+   nltk.download('stopwords')   # For stopword filtering
+   ```
+
+3. Verify the resources are correctly installed:
+   ```bash
+   python -c "import nltk; print(nltk.sent_tokenize('Hello world. This is a test.'))"
+   ```
+
+If you continue to experience issues, consult the [NLTK data installation guide](https://www.nltk.org/data.html).
 
 ### Context Settings
 
