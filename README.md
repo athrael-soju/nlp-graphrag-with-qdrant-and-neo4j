@@ -1,6 +1,6 @@
-# GraphRAG: Graph-based Retrieval Augmented Generation
+# GraphRAG: NLP based GraphRag with Qdrant and Neo4j
 
-GraphRAG is a Python system that implements a knowledge graph enhanced retrieval-augmented generation (RAG) pipeline. It combines traditional vector-based document retrieval with graph-based knowledge representation for improved context retrieval.
+This a Python application that implements a knowledge graph enhanced retrieval-augmented generation (RAG) pipeline. It combines traditional vector-based document retrieval with graph-based knowledge representation for improved context retrieval.
 
 ## Features
 
