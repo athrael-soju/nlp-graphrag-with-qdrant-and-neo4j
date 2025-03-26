@@ -1,4 +1,4 @@
-# GraphRAG: NLP based GraphRag with Qdrant and Neo4j
+# Down the Rabbit Hole: NLP based GraphRag with Qdrant and Neo4j
 
 This a Python application that implements a knowledge graph enhanced retrieval-augmented generation (RAG) pipeline. It combines traditional vector-based document retrieval with graph-based knowledge representation for improved context retrieval.
 
