@@ -163,8 +163,7 @@ This will start both Neo4j and Qdrant with the correct configuration.
 Clone this repository and install the package:
 
 ```bash
-git clone https://github.com/yourusername/graphrag.git
-cd graphrag
+git clone https://github.com/athrael-soju/nlp-graphrag-with-qdrant-and-neo4j.git
 
 python -m venv venv
 source venv/bin/activate # On Windows: venv\Scripts\activate
