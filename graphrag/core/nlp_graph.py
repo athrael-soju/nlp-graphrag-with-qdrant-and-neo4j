@@ -123,6 +123,80 @@ class NLPGraphBuilder:
         
         return unigrams, bigrams, trigrams
 
+    def store_video_segments_in_neo4j(self, video_id: str, segments: List[dict]) -> None:
+        """
+        Stores video segments in Neo4j and establishes BEFORE/AFTER relationships
+        between consecutive segments.
+
+        Args:
+            video_id (str): Identifier for the parent video.
+            segments (List[dict]): A list of segment data. Each dictionary should have
+                                   at least 'id' (unique segment identifier),
+                                   'sequence_number' (for ordering), and other properties like
+                                   'start_time', 'end_time', 'frame_paths'.
+        """
+        if not segments: # Modified this: if not segments and not self.neo4j.run_query("MATCH (v:Video {id: $video_id}) RETURN v", {"video_id": video_id}):
+            logger.info(f"No segments provided for video {video_id}. Nothing to store unless Video node needs creation.")
+            # Original logic: if not segments: return. Now, ensure Video node is created.
+
+        logger.info(f"Processing {len(segments)} segments for video {video_id} in Neo4j.") # This log might be confusing if segments is empty
+
+        # Create Video node if it doesn't exist (or match it)
+        # This should be done even if there are no segments, to represent the video's existence.
+        self.neo4j.run_query(
+            "MERGE (v:Video {id: $video_id}) RETURN v",
+            {"video_id": video_id}
+        )
+
+        if not segments: # Check for empty segments after creating the Video node
+            logger.info(f"No segments were provided for video {video_id}. Only Video node was ensured.")
+            return
+
+        # Ensure segments are sorted by sequence_number if not already
+        # For this example, we assume the input list 'segments' is already sorted.
+        # If not, they should be sorted: sorted_segments = sorted(segments, key=lambda x: x['sequence_number'])
+
+        for i, segment_data in enumerate(segments):
+            segment_id = segment_data.get("id")
+            if not segment_id:
+                logger.warning(f"Segment at index {i} for video {video_id} is missing an 'id'. Skipping.")
+                continue
+
+            node_properties = {
+                "id": segment_id,
+                "video_id": video_id,
+                "start_time": segment_data.get("start_time"),
+                "end_time": segment_data.get("end_time"),
+                "sequence_number": segment_data.get("sequence_number", i),
+            }
+
+            query = """
+            MATCH (vid:Video {id: $video_id})
+            MERGE (s:VideoSegment {id: $segment_id})
+            ON CREATE SET s = $props
+            ON MATCH SET s += $props
+            MERGE (vid)-[:HAS_SEGMENT]->(s)
+            """
+            self.neo4j.run_query(query, {"video_id": video_id, "segment_id": segment_id, "props": node_properties})
+            logger.debug(f"Stored VideoSegment node: {segment_id}")
+
+            if i > 0:
+                prev_segment_data = segments[i-1]
+                prev_segment_id = prev_segment_data.get("id")
+                if prev_segment_id:
+                    rel_query_corrected = """
+                    MATCH (s1:VideoSegment {id: $prev_id}) // Previous segment
+                    MATCH (s2:VideoSegment {id: $curr_id}) // Current segment
+                    MERGE (s1)-[:BEFORE]->(s2)
+                    MERGE (s2)-[:AFTER]->(s1)
+                    """
+                    self.neo4j.run_query(rel_query_corrected, {"prev_id": prev_segment_id, "curr_id": segment_id})
+                    logger.debug(f"Linked {prev_segment_id} -BEFORE-> {segment_id}")
+                    logger.debug(f"Linked {segment_id} -AFTER-> {prev_segment_id}")
+
+        logger.info(f"Successfully processed and linked segments for video {video_id}.")
+
+
 try:
     # Check if pyspark and spark-nlp are available
     import pyspark
@@ -144,8 +218,17 @@ try:
             super().__init__(neo4j_conn, remove_stopwords)
             
             # Initialize Spark session with Spark NLP
-            self.spark = sparknlp.start()
-            
+            try:
+                self.spark = sparknlp.start()
+            except Exception as e:
+                logger.error(f"Failed to start Spark NLP session: {e}")
+                logger.warning("SparkNLPGraphBuilder will not be fully functional.")
+                self.spark = None
+                return
+
+            if not self.spark:
+                return
+
             # Import required Spark NLP components
             from sparknlp.base import DocumentAssembler, Finisher
             from sparknlp.annotator import Tokenizer, Normalizer, NGramGenerator
@@ -173,10 +256,13 @@ try:
             ])
             
             # Fit the pipeline (this creates a model that can transform data)
-            self.model = self.pipeline.fit(self.spark.createDataFrame([("",)], ["text"]))
-            
-            logger.info("Spark NLP pipeline initialized")
-            
+            if self.spark:
+                self.model = self.pipeline.fit(self.spark.createDataFrame([("",)], ["text"]))
+                logger.info("Spark NLP pipeline initialized")
+            else:
+                self.model = None
+                logger.warning("Spark NLP model not fitted as Spark session is unavailable.")
+
         def process_chunks(self, chunks: List[Tuple[str, str]]) -> List[Tuple[str, List[str], List[str], List[str]]]:
             """Process multiple chunks with Spark NLP
             
@@ -186,6 +272,16 @@ try:
             Returns:
                 List[Tuple[str, List[str], List[str], List[str]]]: List of (chunk_id, unigrams, bigrams, trigrams) tuples
             """
+            if not self.spark or not self.model:
+                logger.error("Spark session or model not available. Cannot process chunks with Spark.")
+                logger.warning("Falling back to sequential NLTK processing for text chunks due to Spark issue.")
+                processed_chunks_fallback = []
+                for chunk_id, chunk_text in chunks:
+                    unigrams, bigrams, trigrams = super().extract_ngrams(chunk_text)
+                    super().store_terms_for_chunk(chunk_id, unigrams, bigrams, trigrams)
+                    processed_chunks_fallback.append((chunk_id, unigrams, bigrams, trigrams))
+                return processed_chunks_fallback
+
             logger.info(f"Processing {len(chunks)} chunks with Spark NLP")
             
             # Create Spark DataFrame from chunks
@@ -292,4 +388,39 @@ if __name__ == "__main__":
     print(f"Extracted {len(unigrams)} unigrams, {len(bigrams)} bigrams, {len(trigrams)} trigrams")
     print("Sample unigrams:", unigrams[:5])
     print("Sample bigrams:", bigrams[:5])
-    print("Sample trigrams:", trigrams[:5]) 
+    print("Sample trigrams:", trigrams[:5])
+
+    # --- Mock Neo4j Connection and Test for store_video_segments_in_neo4j ---
+    class MockNeo4jConnection:
+        def __init__(self):
+            self.queries_run = []
+
+        def run_query(self, query: str, params: Optional[dict] = None) -> None:
+            logger.info(f"MOCK NEO4J: Running query: {query.strip()} with params: {params}")
+            self.queries_run.append({"query": query, "params": params})
+
+        def close(self):
+            logger.info("MOCK NEO4J: Connection closed.")
+
+    logger.info("\n--- Testing store_video_segments_in_neo4j with Mock Connection ---")
+    mock_conn = MockNeo4jConnection()
+
+    builder_opts = {"neo4j_conn": mock_conn, "remove_stopwords": True}
+    video_graph_builder = NLPGraphBuilder(**builder_opts)
+
+    sample_video_id = "video123"
+    sample_segments = [
+        {"id": "seg_001", "sequence_number": 0, "start_time": 0.0, "end_time": 5.0, "frame_paths": ["f1.jpg", "f2.jpg"]},
+        {"id": "seg_002", "sequence_number": 1, "start_time": 5.0, "end_time": 10.0, "frame_paths": ["f3.jpg", "f4.jpg"]},
+        {"id": "seg_003", "sequence_number": 2, "start_time": 10.0, "end_time": 15.0, "frame_paths": ["f5.jpg", "f6.jpg"]},
+    ]
+
+    video_graph_builder.store_video_segments_in_neo4j(sample_video_id, sample_segments)
+
+    logger.info("\n--- Queries Run by store_video_segments_in_neo4j ---")
+    for i, item in enumerate(mock_conn.queries_run):
+        logger.info(f"Query {i+1}:")
+        logger.info(f"  Cypher: {item['query'].strip()}")
+        logger.info(f"  Params: {item['params']}")
+
+    logger.info("\n--- End of NLP Graph Demo ---")
